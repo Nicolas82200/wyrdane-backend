@@ -5,6 +5,9 @@ USE wyrdane_game;
 DROP TABLE IF EXISTS deck_cards;
 DROP TABLE IF EXISTS decks;
 DROP TABLE IF EXISTS user_cards;
+DROP TABLE IF EXISTS purchase_ledger;
+DROP TABLE IF EXISTS user_cosmetics;
+DROP TABLE IF EXISTS cosmetic_items;
 DROP TABLE IF EXISTS match_reports;
 DROP TABLE IF EXISTS match_history;
 DROP TABLE IF EXISTS ranked_stats;
@@ -80,6 +83,36 @@ CREATE TABLE deck_cards (
   UNIQUE KEY unique_deck_card (deck_id, card_id)
 );
 
+CREATE TABLE cosmetic_items (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  steam_item_id VARCHAR(50) NOT NULL UNIQUE,
+  name VARCHAR(150) NOT NULL,
+  category VARCHAR(30) NOT NULL,
+  price_cents INT NOT NULL
+);
+
+CREATE TABLE user_cosmetics (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  user_id INT NOT NULL,
+  item_id INT NOT NULL,
+  acquired_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (item_id) REFERENCES cosmetic_items(id) ON DELETE CASCADE,
+  UNIQUE KEY unique_user_item (user_id, item_id)
+);
+
+-- order_id est choisi par nous (requis par InitTxn de l'API Steamworks
+-- Microtransactions) ; steam_txn_id est le transid renvoyé par Steam.
+CREATE TABLE purchase_ledger (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  user_id INT NOT NULL,
+  item_id INT NOT NULL,
+  order_id BIGINT NOT NULL UNIQUE,
+  steam_txn_id VARCHAR(64),
+  status VARCHAR(20) NOT NULL DEFAULT 'pending',
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (item_id) REFERENCES cosmetic_items(id) ON DELETE CASCADE
 CREATE TABLE ranked_stats (
   user_id INT PRIMARY KEY,
   mmr INT NOT NULL DEFAULT 1000,
