@@ -1,9 +1,10 @@
-DROP DATABASE IF EXISTS wyrdane;
-CREATE DATABASE IF NOT EXISTS wyrdane CHARACTER SET utf8mb4;
-USE wyrdane;
+DROP DATABASE IF EXISTS wyrdane_game;
+CREATE DATABASE IF NOT EXISTS wyrdane_game CHARACTER SET utf8mb4;
+USE wyrdane_game;
 
 DROP TABLE IF EXISTS deck_cards;
 DROP TABLE IF EXISTS decks;
+DROP TABLE IF EXISTS user_cards;
 DROP TABLE IF EXISTS cards;
 DROP TABLE IF EXISTS linked_accounts;
 DROP TABLE IF EXISTS users;
@@ -43,6 +44,19 @@ CREATE TABLE cards (
   INDEX idx_cards_type (card_type),
   INDEX idx_cards_race (race),
   INDEX idx_cards_rarity (rarity)
+);
+
+-- Cartes effectivement débloquées par un joueur (collection persistante).
+-- Un deck ne peut utiliser que des cartes présentes ici, en quantité suffisante.
+CREATE TABLE user_cards (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  user_id INT NOT NULL,
+  card_id INT NOT NULL,
+  quantity INT NOT NULL DEFAULT 1,
+  unlocked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (card_id) REFERENCES cards(id) ON DELETE CASCADE,
+  UNIQUE KEY unique_user_card (user_id, card_id)
 );
 
 CREATE TABLE decks (

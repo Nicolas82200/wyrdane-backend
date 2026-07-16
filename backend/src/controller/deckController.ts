@@ -10,6 +10,7 @@ import {
 	replaceCards,
 	deleteDeck,
 } from "../model/decksModel";
+import { findMissing } from "../model/collectionModel";
 
 const getUserId = (req: Request): number | null => {
 	const payload = req.user as JwtPayload | undefined;
@@ -84,6 +85,15 @@ const save = async (req: Request, res: Response): Promise<void> => {
 
 		if (!name || !Array.isArray(entries)) {
 			res.status(400).json({ message: "Payload invalide" });
+			return;
+		}
+
+		const missing = await findMissing(userId, entries);
+		if (missing.length > 0) {
+			res.status(400).json({
+				message: "Cartes non possédées en quantité suffisante",
+				missing,
+			});
 			return;
 		}
 

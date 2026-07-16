@@ -1,0 +1,29 @@
+import { Request, Response } from "express";
+import type { JwtPayload } from "jsonwebtoken";
+
+import { findByUserId } from "../model/collectionModel";
+
+const getUserId = (req: Request): number | null => {
+	const payload = req.user as JwtPayload | undefined;
+	if (!payload || typeof payload.id === "undefined") return null;
+	const id = Number(payload.id);
+	return Number.isNaN(id) ? null : id;
+};
+
+const getCollection = async (req: Request, res: Response): Promise<void> => {
+	try {
+		const userId = getUserId(req);
+		if (!userId) {
+			res.status(401).json({ message: "Non authentifié" });
+			return;
+		}
+
+		const cards = await findByUserId(userId);
+		res.status(200).json(cards);
+	} catch (error) {
+		console.error(error);
+		res.status(500).json({ message: "Server error" });
+	}
+};
+
+export { getCollection };

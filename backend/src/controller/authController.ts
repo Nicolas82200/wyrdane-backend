@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 
 import { authenticateSteamTicket } from "../helper/steamHelper";
 import { findBySteamId, createWithSteamAccount } from "../model/userModel";
+import { grantAllCards } from "../model/collectionModel";
 import { encodeJWT } from "../helper/jwtHelper";
 
 // Appelé par le client Godot (jeu) et par le site web après le flow
@@ -22,7 +23,15 @@ const steamLogin = async (req: Request, res: Response): Promise<void> => {
 		}
 
 		const [existingUser] = await findBySteamId(steamId);
-		const user = existingUser ?? (await createWithSteamAccount(`Player${steamId.slice(-6)}`, steamId));
+		let user: { id: number; username: string } | undefined = existingUser;
+		if (!user) {
+			user = await createWithSteamAccount(`Player${steamId.slice(-6)}`, steamId);
+			// En dev, on débloque toute la collection pour tester le deck builder
+			// sans avoir à implémenter les autres sources de déblocage (Phase 2/3).
+			if (process.env.DEV_GRANT_ALL_CARDS === "true") {
+				await grantAllCards(user.id);
+			}
+		}
 
 		const safeUser = { id: user.id, name: user.username };
 		const token = encodeJWT(safeUser);
