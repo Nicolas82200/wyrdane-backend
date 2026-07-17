@@ -5,6 +5,9 @@ USE wyrdane_game;
 DROP TABLE IF EXISTS deck_cards;
 DROP TABLE IF EXISTS decks;
 DROP TABLE IF EXISTS user_cards;
+DROP TABLE IF EXISTS match_reports;
+DROP TABLE IF EXISTS match_history;
+DROP TABLE IF EXISTS ranked_stats;
 DROP TABLE IF EXISTS purchase_ledger;
 DROP TABLE IF EXISTS user_cosmetics;
 DROP TABLE IF EXISTS cosmetic_items;
@@ -81,6 +84,47 @@ CREATE TABLE deck_cards (
   FOREIGN KEY (deck_id) REFERENCES decks(id) ON DELETE CASCADE,
   FOREIGN KEY (card_id) REFERENCES cards(id) ON DELETE CASCADE,
   UNIQUE KEY unique_deck_card (deck_id, card_id)
+);
+
+CREATE TABLE ranked_stats (
+  user_id INT PRIMARY KEY,
+  mmr INT NOT NULL DEFAULT 1000,
+  wins INT NOT NULL DEFAULT 0,
+  losses INT NOT NULL DEFAULT 0,
+  season INT NOT NULL DEFAULT 1,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+-- Un match confirmé n'existe ici qu'une fois que les deux rapports (voir
+-- match_reports) concordent sur le vainqueur.
+CREATE TABLE match_history (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  client_match_id VARCHAR(100) NOT NULL UNIQUE,
+  player1_id INT NOT NULL,
+  player2_id INT NOT NULL,
+  winner_id INT NOT NULL,
+  season INT NOT NULL,
+  played_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (player1_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (player2_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (winner_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+-- Un rapport par joueur et par match (client_match_id = identifiant généré
+-- côté client, partagé par les deux joueurs d'une même partie P2P). Le match
+-- n'est validé (cf match_history) que quand les deux rapports concordent.
+CREATE TABLE match_reports (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  client_match_id VARCHAR(100) NOT NULL,
+  reporter_id INT NOT NULL,
+  opponent_id INT NOT NULL,
+  winner_id INT NOT NULL,
+  season INT NOT NULL,
+  reported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (reporter_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (opponent_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (winner_id) REFERENCES users(id) ON DELETE CASCADE,
+  UNIQUE KEY unique_match_reporter (client_match_id, reporter_id)
 );
 
 CREATE TABLE cosmetic_items (
