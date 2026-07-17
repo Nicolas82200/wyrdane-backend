@@ -18,7 +18,23 @@ interface AuthenticateUserTicketResponse {
   };
 }
 
+// Préfixe reconnu uniquement en dev (voir DEV_SKIP_STEAM_VERIFY) : un ticket
+// réel de GodotSteam est un buffer binaire hex-encodé, jamais sous cette forme.
+const DEV_TICKET_PREFIX = "DEV:";
+
 const authenticateSteamTicket = async (ticket: string): Promise<string | null> => {
+  // Bypass dev uniquement : AuthenticateUserTicket exige une clé Publisher
+  // Web API (accès Steamworks Partner), qu'on n'a pas encore. Permet de tester
+  // le flow ticket du client Godot sans elle. Jamais actif en production.
+  if (
+    process.env.NODE_ENV !== "production" &&
+    process.env.DEV_SKIP_STEAM_VERIFY === "true" &&
+    ticket.startsWith(DEV_TICKET_PREFIX)
+  ) {
+    console.warn("⚠️  DEV_SKIP_STEAM_VERIFY actif : ticket Steam non vérifié auprès de Steam (dev uniquement)");
+    return ticket.slice(DEV_TICKET_PREFIX.length);
+  }
+
   const { STEAM_WEB_API_KEY, STEAM_APP_ID } = process.env;
   const url = new URL(
     "https://partner.steam-api.com/ISteamUserAuth/AuthenticateUserTicket/v1/",
