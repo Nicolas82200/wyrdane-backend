@@ -6,7 +6,6 @@ import collectionRouter from "./collectionRouter";
 import deckRouter from "./deckRouter";
 import rankedRouter from "./rankedRouter";
 import shopRouter from "./shopRouter";
-import rankedRouter from "./rankedRouter";
 import userRouter from "./userRouter";
 
 const router = Router();
@@ -19,6 +18,5 @@ router.use("/collection", authorization, collectionRouter);
 router.use("/decks", authorization, deckRouter);
 router.use("/ranked", authorization, rankedRouter);
 router.use("/shop", authorization, shopRouter);
-router.use("/ranked", authorization, rankedRouter);
 
 export default router;
