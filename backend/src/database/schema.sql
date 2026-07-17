@@ -8,6 +8,9 @@ DROP TABLE IF EXISTS user_cards;
 DROP TABLE IF EXISTS match_reports;
 DROP TABLE IF EXISTS match_history;
 DROP TABLE IF EXISTS ranked_stats;
+DROP TABLE IF EXISTS purchase_ledger;
+DROP TABLE IF EXISTS user_cosmetics;
+DROP TABLE IF EXISTS cosmetic_items;
 DROP TABLE IF EXISTS cards;
 DROP TABLE IF EXISTS linked_accounts;
 DROP TABLE IF EXISTS users;
@@ -119,4 +122,36 @@ CREATE TABLE match_reports (
   FOREIGN KEY (opponent_id) REFERENCES users(id) ON DELETE CASCADE,
   FOREIGN KEY (winner_id) REFERENCES users(id) ON DELETE CASCADE,
   UNIQUE KEY unique_match_reporter (client_match_id, reporter_id)
+);
+
+CREATE TABLE cosmetic_items (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  steam_item_id VARCHAR(50) NOT NULL UNIQUE,
+  name VARCHAR(150) NOT NULL,
+  category VARCHAR(30) NOT NULL,
+  price_cents INT NOT NULL
+);
+
+CREATE TABLE user_cosmetics (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  user_id INT NOT NULL,
+  item_id INT NOT NULL,
+  acquired_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (item_id) REFERENCES cosmetic_items(id) ON DELETE CASCADE,
+  UNIQUE KEY unique_user_item (user_id, item_id)
+);
+
+-- order_id est choisi par nous (requis par InitTxn de l'API Steamworks
+-- Microtransactions) ; steam_txn_id est le transid renvoyé par Steam.
+CREATE TABLE purchase_ledger (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  user_id INT NOT NULL,
+  item_id INT NOT NULL,
+  order_id BIGINT NOT NULL UNIQUE,
+  steam_txn_id VARCHAR(64),
+  status VARCHAR(20) NOT NULL DEFAULT 'pending',
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (item_id) REFERENCES cosmetic_items(id) ON DELETE CASCADE
 );
