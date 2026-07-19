@@ -5,7 +5,8 @@
 	"main": "index.ts",
 	"type": "commonjs",
 	"scripts": {
-		"dev": "tsx watch src/index.ts"
+		"dev": "tsx watch src/index.ts",
+		"db:migrate": "tsx src/database/migrate.ts"
 	},
 	"dependencies": {
 		"cookie-parser": "^1.4.7",

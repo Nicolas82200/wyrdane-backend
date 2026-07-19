@@ -1,5 +1,3 @@
--- Généré automatiquement depuis resources/cards/ (E:\card-game)
--- Nombre de cartes : 304
 
 INSERT INTO cards (name, race, card_type, lane, cost, attack, hp, rarity, charges, effect, flavor, image_path) VALUES ('Fragment de Pacte', 'Demon', 'Ressource', NULL, 0, NULL, NULL, 'Commune', NULL, 'Ajoute 1 Pacte à ta réserve Démoniaque. Une seule carte-ressource peut être posée par tour.', 'Une clause parmi tant d''autres. Elle aussi se paiera.', '/assets/card_art/resource/demon-resource.jpg');
 INSERT INTO cards (name, race, card_type, lane, cost, attack, hp, rarity, charges, effect, flavor, image_path) VALUES ('Éclat d''Anomalie', 'Abomination', 'Ressource', NULL, 0, NULL, NULL, 'Commune', NULL, 'Ajoute 1 Anomalie à ta réserve Abomination. Une seule carte-ressource par tour et par camp.', 'Ça continue de battre, même détaché de tout le reste.', '/assets/card_art/resource/abomination-resource.jpg');
