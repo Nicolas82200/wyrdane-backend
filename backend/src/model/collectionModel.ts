@@ -51,6 +51,22 @@ const grantAllCards = async (userId: number): Promise<void> => {
 	);
 };
 
+// Résout un lot de noms de cartes vers leurs id (voir POST
+// /api/collection/claim-starter, qui référence les cartes des decks de départ
+// par nom plutôt que par id pour rester lisible/maintenable côté code).
+const findIdsByName = async (
+	names: string[],
+	connection?: PoolConnection,
+): Promise<Map<string, number>> => {
+	if (names.length === 0) return new Map();
+	const runner = connection ?? db;
+	const [rows] = await runner.query<(RowDataPacket & { id: number; name: string })[]>(
+		"SELECT id, name FROM cards WHERE name IN (?)",
+		[names],
+	);
+	return new Map(rows.map((row) => [row.name, row.id]));
+};
+
 // Vérifie que le joueur possède au moins la quantité demandée pour chaque
 // entrée. Renvoie la liste des entrées en défaut (vide si tout est possédé).
 const findMissing = async (
@@ -68,4 +84,4 @@ const findMissing = async (
 	return entries.filter((e) => (owned.get(e.cardId) ?? 0) < e.quantity);
 };
 
-export { findByUserId, grantCard, grantAllCards, findMissing };
+export { findByUserId, grantCard, grantAllCards, findIdsByName, findMissing };
