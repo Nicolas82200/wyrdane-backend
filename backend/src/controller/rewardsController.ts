@@ -3,9 +3,13 @@ import type { JwtPayload } from "jsonwebtoken";
 
 import { credit, getBalance, countReasonToday } from "../model/currencyModel";
 
-const SOLO_WIN_REWARD = 20;
+const SOLO_WIN_REWARD = 25;
 const SOLO_WIN_DAILY_CAP = 5;
 const SOLO_WIN_REASON = "match_win_solo";
+
+const SOLO_DEFEAT_REWARD = 10;
+const SOLO_DEFEAT_DAILY_CAP = 5;
+const SOLO_DEFEAT_REASON = "match_loss_solo";
 
 const getUserId = (req: Request): number | null => {
 	const payload = req.user as JwtPayload | undefined;
@@ -16,7 +20,9 @@ const getUserId = (req: Request): number | null => {
 
 // Un match solo/vs IA n'a pas de second client pour contredire un rapport
 // menteur (contrairement au flux ranked, à double rapport) : la récompense
-// est donc plus faible et plafonnée par jour plutôt que non bornée.
+// est donc plus faible et plafonnée par jour plutôt que non bornée. Une
+// défaite rapporte aussi (moins qu'une victoire) pour garder la boucle de
+// jeu motivante même en cas de série perdante, plafonnée séparément.
 const reportSoloMatch = async (req: Request, res: Response): Promise<void> => {
 	try {
 		const userId = getUserId(req);
@@ -31,18 +37,17 @@ const reportSoloMatch = async (req: Request, res: Response): Promise<void> => {
 			return;
 		}
 
-		if (result !== "victory") {
+		const reward = result === "victory" ? SOLO_WIN_REWARD : SOLO_DEFEAT_REWARD;
+		const dailyCap = result === "victory" ? SOLO_WIN_DAILY_CAP : SOLO_DEFEAT_DAILY_CAP;
+		const reason = result === "victory" ? SOLO_WIN_REASON : SOLO_DEFEAT_REASON;
+
+		const alreadyToday = await countReasonToday(userId, reason);
+		if (alreadyToday >= dailyCap) {
 			res.status(200).json({ credited: false, balance: await getBalance(userId) });
 			return;
 		}
 
-		const alreadyToday = await countReasonToday(userId, SOLO_WIN_REASON);
-		if (alreadyToday >= SOLO_WIN_DAILY_CAP) {
-			res.status(200).json({ credited: false, balance: await getBalance(userId) });
-			return;
-		}
-
-		await credit(userId, SOLO_WIN_REWARD, SOLO_WIN_REASON);
+		await credit(userId, reward, reason);
 		res.status(200).json({ credited: true, balance: await getBalance(userId) });
 	} catch (error) {
 		console.error(error);
