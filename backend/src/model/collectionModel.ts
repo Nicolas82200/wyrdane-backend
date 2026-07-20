@@ -38,13 +38,33 @@ const grantCard = async (
 	);
 };
 
+// 40 par carte : au-delà du max de copies d'un serviteur/sort (4) et large
+// pour les cartes-ressource, qui n'ont pas de plafond de copies dans un deck.
+const DEV_GRANT_QUANTITY = 40;
+
 const grantAllCards = async (userId: number): Promise<void> => {
 	await db.query(
 		`INSERT INTO user_cards (user_id, card_id, quantity)
-		 SELECT ?, id, 3 FROM cards
+		 SELECT ?, id, ? FROM cards
 		 ON DUPLICATE KEY UPDATE quantity = quantity`,
-		[userId],
+		[userId, DEV_GRANT_QUANTITY],
 	);
+};
+
+// Résout un lot de noms de cartes vers leurs id (voir POST
+// /api/collection/claim-starter, qui référence les cartes des decks de départ
+// par nom plutôt que par id pour rester lisible/maintenable côté code).
+const findIdsByName = async (
+	names: string[],
+	connection?: PoolConnection,
+): Promise<Map<string, number>> => {
+	if (names.length === 0) return new Map();
+	const runner = connection ?? db;
+	const [rows] = await runner.query<(RowDataPacket & { id: number; name: string })[]>(
+		"SELECT id, name FROM cards WHERE name IN (?)",
+		[names],
+	);
+	return new Map(rows.map((row) => [row.name, row.id]));
 };
 
 // Vérifie que le joueur possède au moins la quantité demandée pour chaque
@@ -64,4 +84,4 @@ const findMissing = async (
 	return entries.filter((e) => (owned.get(e.cardId) ?? 0) < e.quantity);
 };
 
-export { findByUserId, grantCard, grantAllCards, findMissing };
+export { findByUserId, grantCard, grantAllCards, findIdsByName, findMissing };

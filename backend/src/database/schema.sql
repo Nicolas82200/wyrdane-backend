@@ -20,7 +20,10 @@ CREATE TABLE users (
   id INT AUTO_INCREMENT PRIMARY KEY,
   username VARCHAR(50) UNIQUE NOT NULL,
   soft_currency INT NOT NULL DEFAULT 0,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  -- Rempli par POST /api/collection/claim-starter (fin de tutoriel) : évite de
+  -- regrant/recréer les decks de départ si le joueur relance la réclamation.
+  starter_claimed_at TIMESTAMP NULL DEFAULT NULL
 );
 
 -- Une ligne par identité liée (Steam aujourd'hui, potentiellement email/Google/Apple

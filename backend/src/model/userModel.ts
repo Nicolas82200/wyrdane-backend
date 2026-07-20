@@ -1,4 +1,5 @@
 import { RowDataPacket, ResultSetHeader } from "mysql2";
+import type { PoolConnection } from "mysql2/promise";
 
 import db from "./db";
 import { User } from "../types";
@@ -56,4 +57,20 @@ const createWithSteamAccount = async (
 	}
 };
 
-export { findOne, findBySteamId, createWithSteamAccount };
+// Voir POST /api/collection/claim-starter : empêche de regrant/recréer les
+// decks de départ si le joueur (ou le client, en cas de retry réseau) rappelle
+// la route après une première réclamation réussie.
+const hasClaimedStarter = async (userId: number): Promise<boolean> => {
+	const [rows] = await db.query<(RowDataPacket & { starter_claimed_at: string | null })[]>(
+		"SELECT starter_claimed_at FROM `users` WHERE id = ?",
+		[userId],
+	);
+	return rows.length > 0 && rows[0].starter_claimed_at !== null;
+};
+
+const markStarterClaimed = async (userId: number, connection?: PoolConnection): Promise<void> => {
+	const runner = connection ?? db;
+	await runner.query("UPDATE `users` SET starter_claimed_at = NOW() WHERE id = ?", [userId]);
+};
+
+export { findOne, findBySteamId, createWithSteamAccount, hasClaimedStarter, markStarterClaimed };

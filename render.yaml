@@ -1,0 +1,37 @@
+services:
+  - type: web
+    name: wyrdane-backend
+    runtime: node
+    plan: free
+    rootDir: backend
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: FRONTEND_URL
+        value: http://localhost:0000
+      - key: BACKEND_URL
+        sync: false
+      - key: DB_HOST
+        sync: false
+      - key: DB_PORT
+        sync: false
+      - key: DB_USER
+        sync: false
+      - key: DB_PASSWORD
+        sync: false
+      - key: DB_NAME
+        sync: false
+      - key: DB_SSL
+        value: "true"
+      - key: TOKEN_SECRET
+        generateValue: true
+      - key: STEAM_WEB_API_KEY
+        value: change_me
+      - key: STEAM_APP_ID
+        value: "480"
+      - key: DEV_GRANT_ALL_CARDS
+        value: "false"
+      - key: DEV_SKIP_STEAM_VERIFY
+        value: "true"
