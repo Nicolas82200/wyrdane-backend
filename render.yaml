@@ -28,7 +28,7 @@ services:
       - key: TOKEN_SECRET
         generateValue: true
       - key: STEAM_WEB_API_KEY
-        value: change_me
+        sync: false
       - key: STEAM_APP_ID
         value: "480"
       - key: DEV_GRANT_ALL_CARDS
