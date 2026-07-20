@@ -44,7 +44,19 @@ const authenticateSteamTicket = async (ticket: string): Promise<string | null> =
   url.searchParams.set("ticket", ticket);
 
   const res = await fetch(url);
-  const data = (await res.json()) as AuthenticateUserTicketResponse;
+  const rawBody = await res.text();
+  let data: AuthenticateUserTicketResponse;
+  try {
+    data = JSON.parse(rawBody) as AuthenticateUserTicketResponse;
+  } catch {
+    // Steam répond parfois en HTML (clé Publisher invalide/manquante, endpoint
+    // injoignable) au lieu du JSON attendu : on log un message exploitable au
+    // lieu de laisser planter sur un SyntaxError opaque à la fermeture du parse.
+    console.error(
+      `authenticateSteamTicket: réponse non-JSON de Steam (status ${res.status}) : ${rawBody.slice(0, 200)}`,
+    );
+    return null;
+  }
 
   const params = data.response?.params;
   if (!params || params.result !== "OK") return null;
