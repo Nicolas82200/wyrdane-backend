@@ -12,6 +12,9 @@ import {
 } from "../model/decksModel";
 import { findMissing } from "../model/collectionModel";
 
+// Doit rester alignée avec MAX_COPIES_PER_CARD du deckbuilder (site web).
+const MAX_COPIES_PER_CARD = 4;
+
 const getUserId = (req: Request): number | null => {
 	const payload = req.user as JwtPayload | undefined;
 	if (!payload || typeof payload.id === "undefined") return null;
@@ -85,6 +88,15 @@ const save = async (req: Request, res: Response): Promise<void> => {
 
 		if (!name || !Array.isArray(entries)) {
 			res.status(400).json({ message: "Payload invalide" });
+			return;
+		}
+
+		const overLimit = entries.filter((e) => e.quantity > MAX_COPIES_PER_CARD);
+		if (overLimit.length > 0) {
+			res.status(400).json({
+				message: `Maximum ${MAX_COPIES_PER_CARD} exemplaires par carte`,
+				overLimit,
+			});
 			return;
 		}
 
