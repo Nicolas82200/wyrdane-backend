@@ -5,7 +5,7 @@ import { debit, getBalance } from "./currencyModel";
 
 import type { Cards } from "../types";
 
-const PACK_COST = 100;
+const PACK_COST = 250;
 const CARDS_PER_PACK = 5;
 
 // Pondération de tirage par rareté (somme non contrainte à 100, seul le
