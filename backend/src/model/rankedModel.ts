@@ -1,9 +1,11 @@
 import type { RowDataPacket } from "mysql2";
 import db from "./db";
 import { calculateElo } from "../helper/eloHelper";
+import { credit } from "./currencyModel";
 
 const CURRENT_SEASON = 1;
 const DEFAULT_MMR = 1000;
+const RANKED_WIN_REWARD = 100;
 
 interface RankedStatsRow extends RowDataPacket {
 	user_id: number;
@@ -123,6 +125,11 @@ const confirmMatch = async (
 			"INSERT INTO match_history (client_match_id, player1_id, player2_id, winner_id, season) VALUES (?, ?, ?, ?, ?)",
 			[clientMatchId, player1Id, player2Id, winnerId, CURRENT_SEASON],
 		);
+
+		// client_match_id est UNIQUE sur match_history : confirmMatch ne peut
+		// s'exécuter qu'une fois par match, donc ce crédit ne peut pas être
+		// dupliqué par un retry réseau du rapport de match.
+		await credit(winnerId, RANKED_WIN_REWARD, "match_win_ranked", clientMatchId, connection);
 
 		await connection.commit();
 	} catch (error) {

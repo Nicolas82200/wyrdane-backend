@@ -11,9 +11,7 @@ DROP TABLE IF EXISTS ranked_stats;
 DROP TABLE IF EXISTS purchase_ledger;
 DROP TABLE IF EXISTS user_cosmetics;
 DROP TABLE IF EXISTS cosmetic_items;
-DROP TABLE IF EXISTS match_reports;
-DROP TABLE IF EXISTS match_history;
-DROP TABLE IF EXISTS ranked_stats;
+DROP TABLE IF EXISTS currency_ledger;
 DROP TABLE IF EXISTS cards;
 DROP TABLE IF EXISTS linked_accounts;
 DROP TABLE IF EXISTS users;
@@ -21,6 +19,7 @@ DROP TABLE IF EXISTS users;
 CREATE TABLE users (
   id INT AUTO_INCREMENT PRIMARY KEY,
   username VARCHAR(50) UNIQUE NOT NULL,
+  soft_currency INT NOT NULL DEFAULT 0,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   -- Rempli par POST /api/collection/claim-starter (fin de tutoriel) : évite de
   -- regrant/recréer les decks de départ si le joueur relance la réclamation.
@@ -160,4 +159,19 @@ CREATE TABLE purchase_ledger (
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
   FOREIGN KEY (item_id) REFERENCES cosmetic_items(id) ON DELETE CASCADE
+);
+
+-- Mouvements de monnaie molle (gagnée en jouant, dépensée en packs) : sert à
+-- la fois d'audit et de base au plafond quotidien des récompenses solo
+-- (compter les lignes reason='match_win_solo' du jour pour un joueur donné).
+-- users.soft_currency reste le solde dénormalisé pour une lecture rapide.
+CREATE TABLE currency_ledger (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  user_id INT NOT NULL,
+  amount INT NOT NULL,
+  reason VARCHAR(30) NOT NULL,
+  reference VARCHAR(100),
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  INDEX idx_currency_ledger_user_reason_date (user_id, reason, created_at)
 );
