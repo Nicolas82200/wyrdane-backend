@@ -5,6 +5,7 @@ import cors from "cors";
 import cookieParser from "cookie-parser";
 
 import router from "./router";
+import pool from "./model/db";
 
 const app = express();
 
@@ -20,6 +21,16 @@ app.use(cookieParser());
 
 app.get("/", (req: Request, res: Response) => {
 	res.status(200).json({ message: "API WildWalker - up & running" });
+});
+
+// Diagnostic temporaire : vérifie la connexion à la base Aiven
+app.get("/health", async (req: Request, res: Response) => {
+	try {
+		await pool.query("SELECT 1");
+		res.status(200).json({ db: "ok" });
+	} catch (error) {
+		res.status(500).json({ db: "error", message: (error as Error).message });
+	}
 });
 
 app.use("/api", router);
