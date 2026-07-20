@@ -1,6 +1,12 @@
 // Vérifie un ticket de session Steam (obtenu côté client via
 // Steam.getAuthSessionTicket() dans GodotSteam) auprès de l'API Web Steamworks.
 // Documentation : https://partner.steamgames.com/doc/webapi/ISteamUserAuth
+//
+// Utilise l'AppID de test 480 (Spacewar) : Valve permet à ce domaine public
+// de vérifier des tickets pour cet AppID avec une simple clé Web API
+// personnelle (steamcommunity.com/dev/apikey), sans accès Steamworks
+// Partner. Le domaine partner.steam-api.com, lui, exige une vraie clé
+// Publisher/Partner Group — inutilisable avec une clé personnelle (403).
 
 interface AuthenticateUserTicketResponse {
   response?: {
@@ -37,7 +43,7 @@ const authenticateSteamTicket = async (ticket: string): Promise<string | null> =
 
   const { STEAM_WEB_API_KEY, STEAM_APP_ID } = process.env;
   const url = new URL(
-    "https://partner.steam-api.com/ISteamUserAuth/AuthenticateUserTicket/v1/",
+    "https://api.steampowered.com/ISteamUserAuth/AuthenticateUserTicket/v1/",
   );
   url.searchParams.set("key", STEAM_WEB_API_KEY as string);
   url.searchParams.set("appid", STEAM_APP_ID as string);
