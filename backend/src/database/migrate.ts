@@ -9,7 +9,7 @@ import { readFileSync } from "fs";
 import { join } from "path";
 import mysql from "mysql2/promise";
 
-const { DB_HOST, DB_PORT, DB_USER, DB_PASSWORD } = process.env;
+const { DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_SSL } = process.env;
 
 const SCHEMA_PATH = join(__dirname, "schema.sql");
 const CARDS_DATA_PATH = join(__dirname, "cards_data.sql");
@@ -30,6 +30,7 @@ const main = async (): Promise<void> => {
 		user: DB_USER,
 		password: DB_PASSWORD,
 		multipleStatements: true,
+		ssl: DB_SSL === "true" ? { rejectUnauthorized: false } : undefined,
 	});
 
 	try {
