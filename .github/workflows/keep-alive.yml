@@ -1,0 +1,15 @@
+name: Keep backend alive
+
+# Le plan Render gratuit met le service en veille après 15 min d'inactivité
+# (cold start ensuite très lent). Ce ping périodique garde l'instance active.
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping backend root endpoint
+        run: curl -fsS --max-time 20 https://wyrdane-backend.onrender.com/
