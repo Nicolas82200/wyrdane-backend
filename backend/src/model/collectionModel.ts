@@ -1,12 +1,31 @@
 import type { RowDataPacket } from "mysql2";
 import type { PoolConnection } from "mysql2/promise";
 import db from "./db";
+import { findById as findCardById } from "./cardsModel";
+import { debit, getBalance } from "./currencyModel";
 
 import type { Cards } from "../types";
 interface UserCardRow extends Cards, RowDataPacket {
 	quantity: number;
 	unlocked_at: string;
 }
+
+class CardNotPurchasableError extends Error {
+	constructor() {
+		super("Cette carte n'est pas disponible à l'achat");
+		this.name = "CardNotPurchasableError";
+	}
+}
+
+// Doit rester synchronisé avec CurrencyManager.CARD_PRICE_BY_RARITY côté
+// client Godot (E:\card-game\scripts\collection\CurrencyManager.gd) — même
+// tarification, affichée là-bas à titre indicatif, appliquée et vérifiée ici.
+const CARD_PRICE_BY_RARITY: Record<string, number> = {
+	Commune: 100,
+	Rare: 150,
+	Épique: 200,
+	Légendaire: 250,
+};
 
 const findByUserId = async (userId: number): Promise<UserCardRow[]> => {
 	const [rows] = await db.query<UserCardRow[]>(
@@ -84,4 +103,59 @@ const findMissing = async (
 	return entries.filter((e) => (owned.get(e.cardId) ?? 0) < e.quantity);
 };
 
-export { findByUserId, grantCard, grantAllCards, findIdsByName, findMissing };
+const getOwnedQuantity = async (userId: number, cardId: number): Promise<number> => {
+	const [rows] = await db.query<(RowDataPacket & { quantity: number })[]>(
+		"SELECT quantity FROM user_cards WHERE user_id = ? AND card_id = ?",
+		[userId, cardId],
+	);
+	return rows[0]?.quantity ?? 0;
+};
+
+// Achat d'une carte à l'unité (boutique du deckbuilder) : débite le prix fixé
+// par rareté et octroie un exemplaire, en transaction (même pattern que
+// packModel.openPack). Les cartes-ressource sont exclues, comme du pool de
+// tirage des packs (fetchDrawablePool) : ce ne sont pas de vraies récompenses
+// de collection.
+const buyCard = async (userId: number, cardId: number): Promise<{ balance: number; quantity: number }> => {
+	const card = await findCardById(cardId);
+	if (!card) throw new CardNotPurchasableError();
+	// card_type est déclaré `number` dans l'interface Cards (types.ts) alors que
+	// la colonne SQL est un VARCHAR — cast défensif, sans toucher ce type
+	// partagé qui déborde du périmètre de cette feature.
+	if (String(card.card_type) === "Ressource") throw new CardNotPurchasableError();
+
+	const price = CARD_PRICE_BY_RARITY[card.rarity ?? ""];
+	if (!price) throw new CardNotPurchasableError();
+
+	const connection = await db.getConnection();
+	try {
+		await connection.beginTransaction();
+
+		await debit(userId, price, "card_buy", String(cardId), connection);
+		await grantCard(userId, cardId, 1, connection);
+
+		await connection.commit();
+	} catch (error) {
+		await connection.rollback();
+		throw error;
+	} finally {
+		connection.release();
+	}
+
+	const [balance, quantity] = await Promise.all([
+		getBalance(userId),
+		getOwnedQuantity(userId, cardId),
+	]);
+	return { balance, quantity };
+};
+
+export {
+	findByUserId,
+	grantCard,
+	grantAllCards,
+	findIdsByName,
+	findMissing,
+	buyCard,
+	CardNotPurchasableError,
+	CARD_PRICE_BY_RARITY,
+};

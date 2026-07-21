@@ -2,7 +2,8 @@ import { Request, Response } from "express";
 import type { JwtPayload } from "jsonwebtoken";
 
 import db from "../model/db";
-import { findByUserId, grantCard, findIdsByName } from "../model/collectionModel";
+import { findByUserId, grantCard, findIdsByName, buyCard as buyCardModel, CardNotPurchasableError } from "../model/collectionModel";
+import { InsufficientFundsError } from "../model/currencyModel";
 import { create as createDeck, replaceCards } from "../model/decksModel";
 import { hasClaimedStarter, markStarterClaimed } from "../model/userModel";
 import { STARTER_DECKS } from "../data/starterDecks";
@@ -90,4 +91,34 @@ const claimStarter = async (req: Request, res: Response): Promise<void> => {
 	}
 };
 
-export { getCollection, claimStarter };
+const buyCard = async (req: Request, res: Response): Promise<void> => {
+	try {
+		const userId = getUserId(req);
+		if (!userId) {
+			res.status(401).json({ message: "Non authentifié" });
+			return;
+		}
+
+		const { cardId } = req.body as { cardId?: number };
+		if (typeof cardId !== "number") {
+			res.status(400).json({ message: "Payload invalide" });
+			return;
+		}
+
+		const { balance, quantity } = await buyCardModel(userId, cardId);
+		res.status(200).json({ balance, quantity });
+	} catch (error) {
+		if (error instanceof InsufficientFundsError) {
+			res.status(400).json({ message: error.message });
+			return;
+		}
+		if (error instanceof CardNotPurchasableError) {
+			res.status(400).json({ message: error.message });
+			return;
+		}
+		console.error(error);
+		res.status(500).json({ message: "Server error" });
+	}
+};
+
+export { getCollection, claimStarter, buyCard };
