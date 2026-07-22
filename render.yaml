@@ -32,6 +32,6 @@ services:
       - key: STEAM_APP_ID
         value: "480"
       - key: DEV_GRANT_ALL_CARDS
-        value: "false"
+        value: "true"
       - key: DEV_SKIP_STEAM_VERIFY
         value: "true"
