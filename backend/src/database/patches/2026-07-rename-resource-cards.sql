@@ -5,6 +5,8 @@
 -- catalogue ↔ carte par le nom exact, un nom divergent rend la carte
 -- invisible dans la collection (grisée dans le deck builder).
 -- Usage : mysql --default-character-set=utf8mb4 ... wyrdane_game < ce_fichier
+-- NB : également appliqué automatiquement au démarrage du serveur (pendant
+-- TypeScript dans src/database/dataPatches.ts) — garder les deux en phase.
 
 UPDATE cards
 SET name = 'Chair',
