@@ -1,7 +1,7 @@
 import { Request, Response } from "express";
 import type { JwtPayload } from "jsonwebtoken";
 
-import { getBalance } from "../model/currencyModel";
+import { getBalance, claimStarterBonus } from "../model/currencyModel";
 
 const getUserId = (req: Request): number | null => {
 	const payload = req.user as JwtPayload | undefined;
@@ -26,4 +26,20 @@ const getMyBalance = async (req: Request, res: Response): Promise<void> => {
 	}
 };
 
-export { getMyBalance };
+const claimStarterBonusHandler = async (req: Request, res: Response): Promise<void> => {
+	try {
+		const userId = getUserId(req);
+		if (!userId) {
+			res.status(401).json({ message: "Non authentifié" });
+			return;
+		}
+
+		const { credited, balance } = await claimStarterBonus(userId);
+		res.status(200).json({ credited, balance });
+	} catch (error) {
+		console.error(error);
+		res.status(500).json({ message: "Server error" });
+	}
+};
+
+export { getMyBalance, claimStarterBonusHandler };

@@ -3,6 +3,7 @@ import type { PoolConnection } from "mysql2/promise";
 
 import db from "./db";
 import { User } from "../types";
+import { STARTER_CURRENCY } from "./currencyModel";
 
 interface UserRow extends User, RowDataPacket {}
 
@@ -36,9 +37,12 @@ const createWithSteamAccount = async (
 	try {
 		await connection.beginTransaction();
 
+		// Solde de départ accordé explicitement (plutôt que de compter sur le
+		// défaut de colonne, qui reste à 0) : les comptes créés avant l'ajout de
+		// ce bonus le reçoivent séparément via claimStarterBonus (voir plus bas).
 		const [userResult] = await connection.query<ResultSetHeader>(
-			"INSERT INTO `users` (username) VALUES (?)",
-			[username],
+			"INSERT INTO `users` (username, soft_currency) VALUES (?, ?)",
+			[username, STARTER_CURRENCY],
 		);
 		const userId = userResult.insertId;
 
