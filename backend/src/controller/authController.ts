@@ -27,10 +27,15 @@ const loginWithSteamId = async (
 	const safeUser = { id: user.id, name: user.username };
 	const token = encodeJWT(safeUser);
 
+	// En production le site et l'API sont sur des domaines différents
+	// (cross-site) : le navigateur n'envoie le cookie sur les XHR que si
+	// SameSite=None + Secure. En dev local (même site localhost), Lax suffit
+	// et évite d'exiger HTTPS.
+	const isProduction = process.env.NODE_ENV === "production";
 	res.cookie("auth_token", `Bearer ${token}`, {
 		httpOnly: true,
-		secure: process.env.NODE_ENV === "production",
-		sameSite: "lax",
+		secure: isProduction,
+		sameSite: isProduction ? "none" : "lax",
 		maxAge: 60 * 60 * 1000,
 	});
 
