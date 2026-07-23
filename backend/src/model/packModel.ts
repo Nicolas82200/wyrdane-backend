@@ -1,7 +1,7 @@
 import type { RowDataPacket } from "mysql2";
 import db from "./db";
-import { grantCard } from "./collectionModel";
-import { debit, getBalance } from "./currencyModel";
+import { grantCard, getOwnedQuantity, MAX_COPIES_PER_CARD, DUST_VALUE_BY_RARITY } from "./collectionModel";
+import { credit, debit, getBalance } from "./currencyModel";
 
 import type { Cards } from "../types";
 
@@ -18,6 +18,14 @@ const RARITY_WEIGHTS: Record<string, number> = {
 };
 
 interface DrawableCardRow extends Cards, RowDataPacket {}
+
+// Carte tirée telle que renvoyée au client : dusted/goldEarned informent
+// l'écran d'ouverture de packs qu'un exemplaire au-delà de
+// MAX_COPIES_PER_CARD a été converti en or plutôt qu'ajouté à la collection.
+interface DrawResult extends DrawableCardRow {
+	dusted: boolean;
+	goldEarned: number;
+}
 
 // Les cartes-ressource ne sont pas de vraies récompenses de collection (une
 // poignée par race, déjà données par claim-starter) : exclues du pool.
@@ -50,7 +58,11 @@ const drawWeightedCards = (pool: DrawableCardRow[], count: number): DrawableCard
 // octroie au joueur, le tout en transaction (même pattern que
 // rankedModel.confirmMatch : débit/octroi ne doivent jamais être partiels).
 // `free` saute le débit (route dev /open-free, gardée par DEV_FREE_PACKS).
-const openPack = async (userId: number, free = false): Promise<{ cards: DrawableCardRow[]; balance: number }> => {
+//
+// Un exemplaire qui porterait la quantité possédée au-delà de
+// MAX_COPIES_PER_CARD (déjà possédé, ou doublon au sein du même pack) n'est
+// pas octroyé : il est converti en or (DUST_VALUE_BY_RARITY).
+const openPack = async (userId: number, free = false): Promise<{ cards: DrawResult[]; balance: number }> => {
 	const pool = await fetchDrawablePool();
 	if (pool.length === 0) throw new Error("Aucune carte disponible pour un pack");
 
@@ -63,13 +75,27 @@ const openPack = async (userId: number, free = false): Promise<{ cards: Drawable
 		}
 
 		const drawn = drawWeightedCards(pool, CARDS_PER_PACK);
+		const pendingQuantities = new Map<number, number>();
+		const results: DrawResult[] = [];
 		for (const card of drawn) {
-			await grantCard(userId, card.id, 1, connection);
+			const alreadyOwned = await getOwnedQuantity(userId, card.id);
+			const pending = pendingQuantities.get(card.id) ?? 0;
+			const projectedQuantity = alreadyOwned + pending;
+
+			if (projectedQuantity >= MAX_COPIES_PER_CARD) {
+				const goldEarned = DUST_VALUE_BY_RARITY[card.rarity] ?? 0;
+				await credit(userId, goldEarned, "pack_duplicate_dust", String(card.id), connection);
+				results.push({ ...card, dusted: true, goldEarned });
+			} else {
+				await grantCard(userId, card.id, 1, connection);
+				pendingQuantities.set(card.id, pending + 1);
+				results.push({ ...card, dusted: false, goldEarned: 0 });
+			}
 		}
 
 		await connection.commit();
 		const balance = await getBalance(userId);
-		return { cards: drawn, balance };
+		return { cards: results, balance };
 	} catch (error) {
 		await connection.rollback();
 		throw error;
