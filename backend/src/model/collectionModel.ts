@@ -142,6 +142,9 @@ const buyCard = async (userId: number, cardId: number): Promise<{ balance: numbe
 	const price = CARD_PRICE_BY_RARITY[card.rarity ?? ""];
 	if (!price) throw new CardNotPurchasableError();
 
+	const alreadyOwned = await getOwnedQuantity(userId, cardId);
+	if (alreadyOwned >= MAX_COPIES_PER_CARD) throw new CardNotPurchasableError();
+
 	const connection = await db.getConnection();
 	try {
 		await connection.beginTransaction();
