@@ -1,14 +1,12 @@
 -- Contrepartie non destructive de schema.sql : à rejouer sans risque contre
--- une base déjà en service (aucun DROP, tout en CREATE TABLE IF NOT EXISTS /
--- ADD COLUMN IF NOT EXISTS). Sert à rattraper un schéma de prod qui n'a
--- jamais reçu les tables/colonnes ajoutées après sa première initialisation
--- via db:migrate (destructif, jamais rejouable sans perdre les données
--- existantes) — voir sync.ts pour l'usage (npm run db:sync).
-
-ALTER TABLE users
-  ADD COLUMN IF NOT EXISTS soft_currency INT NOT NULL DEFAULT 0,
-  ADD COLUMN IF NOT EXISTS starter_claimed_at TIMESTAMP NULL DEFAULT NULL,
-  ADD COLUMN IF NOT EXISTS starter_currency_claimed_at TIMESTAMP NULL DEFAULT NULL;
+-- une base déjà en service (aucun DROP, tout en CREATE TABLE IF NOT EXISTS).
+-- Sert à rattraper un schéma de prod qui n'a jamais reçu les tables/colonnes
+-- ajoutées après sa première initialisation via db:migrate (destructif,
+-- jamais rejouable sans perdre les données existantes) — voir sync.ts pour
+-- l'usage (npm run db:sync). Les colonnes ajoutées à une table existante
+-- (users.soft_currency, etc.) sont gérées à part dans sync.ts : la syntaxe
+-- ALTER TABLE ... ADD COLUMN IF NOT EXISTS n'est pas supportée par toutes les
+-- versions de MySQL/MariaDB.
 
 CREATE TABLE IF NOT EXISTS linked_accounts (
   id INT AUTO_INCREMENT PRIMARY KEY,
