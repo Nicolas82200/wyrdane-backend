@@ -1,9 +1,10 @@
 import { Router } from "express";
 
-import { getMyBalance } from "../controller/currencyController";
+import { getMyBalance, claimStarterBonusHandler } from "../controller/currencyController";
 
 const router = Router();
 
 router.get("/balance", getMyBalance);
+router.post("/claim-starter-bonus", claimStarterBonusHandler);
 
 export default router;

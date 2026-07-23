@@ -9,6 +9,11 @@ class InsufficientFundsError extends Error {
 	}
 }
 
+// Accordé explicitement à la création du compte (voir
+// userModel.createWithSteamAccount) ; les comptes créés avant l'ajout de ce
+// bonus le reçoivent séparément via claimStarterBonus, plus bas.
+const STARTER_CURRENCY = 1000;
+
 const getBalance = async (userId: number): Promise<number> => {
 	const [rows] = await db.query<(RowDataPacket & { soft_currency: number })[]>(
 		"SELECT soft_currency FROM users WHERE id = ?",
@@ -72,4 +77,50 @@ const countReasonToday = async (userId: number, reason: string): Promise<number>
 	return rows[0]?.count ?? 0;
 };
 
-export { InsufficientFundsError, getBalance, credit, debit, countReasonToday };
+// Voir POST /api/currency/claim-starter-bonus : distinct de
+// userModel.hasClaimedStarter (cartes/decks de départ) — couvre les comptes
+// créés avant que createWithSteamAccount n'accorde STARTER_CURRENCY à la
+// création. Idempotent : un second appel est un no-op (credited: false).
+const hasClaimedStarterBonus = async (userId: number): Promise<boolean> => {
+	const [rows] = await db.query<(RowDataPacket & { starter_currency_claimed_at: string | null })[]>(
+		"SELECT starter_currency_claimed_at FROM users WHERE id = ?",
+		[userId],
+	);
+	return rows.length > 0 && rows[0].starter_currency_claimed_at !== null;
+};
+
+const markStarterBonusClaimed = async (userId: number, connection?: PoolConnection): Promise<void> => {
+	const runner: Pool | PoolConnection = connection ?? db;
+	await runner.query("UPDATE users SET starter_currency_claimed_at = NOW() WHERE id = ?", [userId]);
+};
+
+const claimStarterBonus = async (userId: number): Promise<{ credited: boolean; balance: number }> => {
+	if (await hasClaimedStarterBonus(userId)) {
+		return { credited: false, balance: await getBalance(userId) };
+	}
+
+	const connection = await db.getConnection();
+	try {
+		await connection.beginTransaction();
+		await credit(userId, STARTER_CURRENCY, "starter_bonus", undefined, connection);
+		await markStarterBonusClaimed(userId, connection);
+		await connection.commit();
+	} catch (error) {
+		await connection.rollback();
+		throw error;
+	} finally {
+		connection.release();
+	}
+
+	return { credited: true, balance: await getBalance(userId) };
+};
+
+export {
+	InsufficientFundsError,
+	STARTER_CURRENCY,
+	getBalance,
+	credit,
+	debit,
+	countReasonToday,
+	claimStarterBonus,
+};
