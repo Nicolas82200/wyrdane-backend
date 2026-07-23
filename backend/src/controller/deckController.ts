@@ -11,6 +11,7 @@ import {
 	deleteDeck,
 } from "../model/decksModel";
 import { findMissing } from "../model/collectionModel";
+import { findByIds as findCardsByIds } from "../model/cardsModel";
 
 // Doit rester alignée avec MAX_COPIES_PER_CARD du deckbuilder (site web).
 const MAX_COPIES_PER_CARD = 4;
@@ -91,7 +92,19 @@ const save = async (req: Request, res: Response): Promise<void> => {
 			return;
 		}
 
-		const overLimit = entries.filter((e) => e.quantity > MAX_COPIES_PER_CARD);
+		// Les cartes-ressource n'ont ni plafond de copies ni contrainte de
+		// possession dans un deck (voir CLAUDE.md « Système de Ressources par
+		// Race ») : ce ne sont pas des récompenses de collection, juste un
+		// mécanisme de deckbuilding — exclues des deux vérifications ci-dessous.
+		const cardsById = new Map(
+			(await findCardsByIds(entries.map((e) => e.cardId))).map((c) => [c.id, c]),
+		);
+		const isResourceCard = (cardId: number): boolean =>
+			String(cardsById.get(cardId)?.card_type) === "Ressource";
+
+		const overLimit = entries.filter(
+			(e) => !isResourceCard(e.cardId) && e.quantity > MAX_COPIES_PER_CARD,
+		);
 		if (overLimit.length > 0) {
 			res.status(400).json({
 				message: `Maximum ${MAX_COPIES_PER_CARD} exemplaires par carte`,
@@ -100,7 +113,7 @@ const save = async (req: Request, res: Response): Promise<void> => {
 			return;
 		}
 
-		const missing = await findMissing(userId, entries);
+		const missing = await findMissing(userId, entries.filter((e) => !isResourceCard(e.cardId)));
 		if (missing.length > 0) {
 			res.status(400).json({
 				message: "Cartes non possédées en quantité suffisante",

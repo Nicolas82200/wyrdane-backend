@@ -14,4 +14,10 @@ const findById = async (id: number): Promise<CardsRow | null> => {
 	return rows[0] ?? null;
 };
 
-export { findAll, findById };
+const findByIds = async (ids: number[]): Promise<CardsRow[]> => {
+	if (ids.length === 0) return [];
+	const [rows] = await db.query<CardsRow[]>("SELECT * FROM `cards` WHERE id IN (?)", [ids]);
+	return rows;
+};
+
+export { findAll, findById, findByIds };
