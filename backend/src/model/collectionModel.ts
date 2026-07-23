@@ -27,6 +27,21 @@ const CARD_PRICE_BY_RARITY: Record<string, number> = {
 	Légendaire: 250,
 };
 
+// Doit rester synchronisé avec DeckBuilder.MAX_COPIES côté client Godot
+// (E:\card-game\scripts\deck\DeckBuilder.gd) et MAX_COPIES_PER_CARD dans
+// deckController.ts — plafond de copies utilisables d'une carte dans un deck.
+const MAX_COPIES_PER_CARD = 4;
+
+// Or reçu à la place d'un exemplaire de pack qui dépasserait
+// MAX_COPIES_PER_CARD (voir packModel.openPack) — même logique que la
+// destruction/dust d'un TCG classique, montants par rareté.
+const DUST_VALUE_BY_RARITY: Record<string, number> = {
+	Commune: 25,
+	Rare: 50,
+	Épique: 75,
+	Légendaire: 100,
+};
+
 const findByUserId = async (userId: number): Promise<UserCardRow[]> => {
 	const [rows] = await db.query<UserCardRow[]>(
 		`SELECT c.id, c.name, c.race, c.card_type, c.lane, c.cost,
@@ -155,7 +170,10 @@ export {
 	grantAllCards,
 	findIdsByName,
 	findMissing,
+	getOwnedQuantity,
 	buyCard,
 	CardNotPurchasableError,
 	CARD_PRICE_BY_RARITY,
+	MAX_COPIES_PER_CARD,
+	DUST_VALUE_BY_RARITY,
 };
