@@ -49,7 +49,8 @@ const drawWeightedCards = (pool: DrawableCardRow[], count: number): DrawableCard
 // Débite le coût, tire CARDS_PER_PACK cartes pondérées par rareté et les
 // octroie au joueur, le tout en transaction (même pattern que
 // rankedModel.confirmMatch : débit/octroi ne doivent jamais être partiels).
-const openPack = async (userId: number): Promise<{ cards: DrawableCardRow[]; balance: number }> => {
+// `free` saute le débit (route dev /open-free, gardée par DEV_FREE_PACKS).
+const openPack = async (userId: number, free = false): Promise<{ cards: DrawableCardRow[]; balance: number }> => {
 	const pool = await fetchDrawablePool();
 	if (pool.length === 0) throw new Error("Aucune carte disponible pour un pack");
 
@@ -57,7 +58,9 @@ const openPack = async (userId: number): Promise<{ cards: DrawableCardRow[]; bal
 	try {
 		await connection.beginTransaction();
 
-		await debit(userId, PACK_COST, "pack_open", undefined, connection);
+		if (!free) {
+			await debit(userId, PACK_COST, "pack_open", undefined, connection);
+		}
 
 		const drawn = drawWeightedCards(pool, CARDS_PER_PACK);
 		for (const card of drawn) {
