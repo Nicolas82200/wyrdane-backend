@@ -11,7 +11,7 @@ const getUserId = (req: Request): number | null => {
 	return Number.isNaN(id) ? null : id;
 };
 
-const openPackHandler = async (req: Request, res: Response): Promise<void> => {
+const handleOpenPack = async (req: Request, res: Response, free: boolean): Promise<void> => {
 	try {
 		const userId = getUserId(req);
 		if (!userId) {
@@ -19,7 +19,7 @@ const openPackHandler = async (req: Request, res: Response): Promise<void> => {
 			return;
 		}
 
-		const { cards, balance } = await openPack(userId);
+		const { cards, balance } = await openPack(userId, free);
 		res.status(200).json({ cards, balance });
 	} catch (error) {
 		if (error instanceof InsufficientFundsError) {
@@ -31,4 +31,17 @@ const openPackHandler = async (req: Request, res: Response): Promise<void> => {
 	}
 };
 
-export { openPackHandler };
+const openPackHandler = async (req: Request, res: Response): Promise<void> =>
+	handleOpenPack(req, res, false);
+
+// Dev uniquement (flag DEV_FREE_PACKS, même pattern que DEV_GRANT_ALL_CARDS) :
+// ouvre un pack sans débiter le solde, pour tester l'écran d'ouverture.
+const openFreePackHandler = async (req: Request, res: Response): Promise<void> => {
+	if (process.env.DEV_FREE_PACKS !== "true") {
+		res.status(403).json({ message: "Packs gratuits désactivés" });
+		return;
+	}
+	await handleOpenPack(req, res, true);
+};
+
+export { openPackHandler, openFreePackHandler };
