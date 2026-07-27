@@ -1,0 +1,8 @@
+api.wyrdane.example.com {
+	reverse_proxy backend:3000
+}
+
+# Ajouter ici les autres apps hébergées sur le même VPS, ex :
+# app2.example.com {
+# 	reverse_proxy app2:PORT
+# }
