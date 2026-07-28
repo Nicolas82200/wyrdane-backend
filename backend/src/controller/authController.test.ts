@@ -98,7 +98,8 @@ describe("steamLogin", () => {
 		expect(mocked.grantAllCards).not.toHaveBeenCalled();
 	});
 
-	it("grants the full collection to new accounts only when DEV_GRANT_ALL_CARDS is enabled", async () => {
+	it("grants the full collection to new accounts only when DEV_GRANT_ALL_CARDS is enabled outside production", async () => {
+		process.env.NODE_ENV = "development";
 		process.env.DEV_GRANT_ALL_CARDS = "true";
 		mocked.authenticateSteamTicket.mockResolvedValue("76561198000000003");
 		mocked.findBySteamId.mockResolvedValue([]);
@@ -109,6 +110,20 @@ describe("steamLogin", () => {
 		await steamLogin(req, res);
 
 		expect(mocked.grantAllCards).toHaveBeenCalledWith(3);
+	});
+
+	it("never grants the full collection in production, even with the flag set (defense in depth)", async () => {
+		process.env.NODE_ENV = "production";
+		process.env.DEV_GRANT_ALL_CARDS = "true";
+		mocked.authenticateSteamTicket.mockResolvedValue("76561198000000004");
+		mocked.findBySteamId.mockResolvedValue([]);
+		mocked.createWithSteamAccount.mockResolvedValue({ id: 4, username: "Player000004" });
+		const req = { body: { ticket: "ok" } } as unknown as Request;
+		const res = mockRes();
+
+		await steamLogin(req, res);
+
+		expect(mocked.grantAllCards).not.toHaveBeenCalled();
 	});
 
 	it("sets a cross-site-safe cookie (SameSite=None, Secure) in production", async () => {
