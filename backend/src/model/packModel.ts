@@ -36,7 +36,7 @@ const fetchDrawablePool = async (): Promise<DrawableCardRow[]> => {
 	return rows;
 };
 
-const pickWeighted = (pool: DrawableCardRow[]): DrawableCardRow => {
+export const pickWeighted = (pool: DrawableCardRow[]): DrawableCardRow => {
 	const total = pool.reduce((sum, card) => sum + (RARITY_WEIGHTS[card.rarity] ?? 0), 0);
 	let roll = Math.random() * total;
 	for (const card of pool) {
