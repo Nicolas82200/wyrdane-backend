@@ -19,7 +19,7 @@ app.use(express.json());
 app.use(cookieParser());
 
 app.get("/", (req: Request, res: Response) => {
-	res.status(200).json({ message: "API WildWalker - up & running" });
+	res.status(200).json({ message: "API Wyrdane - up & running" });
 });
 
 app.use("/api", router);

@@ -19,7 +19,9 @@ const loginWithSteamId = async (
 		user = await createWithSteamAccount(`Player${steamId.slice(-6)}`, steamId);
 		// En dev, on débloque toute la collection pour tester le deck builder
 		// sans avoir à implémenter les autres sources de déblocage (Phase 2/3).
-		if (process.env.DEV_GRANT_ALL_CARDS === "true") {
+		// Garde NODE_ENV : jamais actif en prod même si le flag traîne à
+		// "true" (voir DEV_SKIP_STEAM_VERIFY, même pattern).
+		if (process.env.NODE_ENV !== "production" && process.env.DEV_GRANT_ALL_CARDS === "true") {
 			await grantAllCards(user.id);
 		}
 	}
