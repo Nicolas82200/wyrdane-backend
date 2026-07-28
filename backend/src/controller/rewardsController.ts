@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import type { JwtPayload } from "jsonwebtoken";
 
 import { credit, getBalance, countReasonToday } from "../model/currencyModel";
+import { incrementResult } from "../model/soloStatsModel";
 
 const SOLO_WIN_REWARD = 25;
 const SOLO_WIN_DAILY_CAP = 5;
@@ -40,6 +41,8 @@ const reportSoloMatch = async (req: Request, res: Response): Promise<void> => {
 		const reward = result === "victory" ? SOLO_WIN_REWARD : SOLO_DEFEAT_REWARD;
 		const dailyCap = result === "victory" ? SOLO_WIN_DAILY_CAP : SOLO_DEFEAT_DAILY_CAP;
 		const reason = result === "victory" ? SOLO_WIN_REASON : SOLO_DEFEAT_REASON;
+
+		await incrementResult(userId, result === "victory");
 
 		const alreadyToday = await countReasonToday(userId, reason);
 		if (alreadyToday >= dailyCap) {

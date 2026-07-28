@@ -8,6 +8,7 @@ DROP TABLE IF EXISTS user_cards;
 DROP TABLE IF EXISTS match_reports;
 DROP TABLE IF EXISTS match_history;
 DROP TABLE IF EXISTS ranked_stats;
+DROP TABLE IF EXISTS solo_stats;
 DROP TABLE IF EXISTS purchase_ledger;
 DROP TABLE IF EXISTS user_cosmetics;
 DROP TABLE IF EXISTS cosmetic_items;
@@ -99,6 +100,16 @@ CREATE TABLE ranked_stats (
   wins INT NOT NULL DEFAULT 0,
   losses INT NOT NULL DEFAULT 0,
   season INT NOT NULL DEFAULT 1,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+-- Compteur de parties solo/vs IA (distinct de ranked_stats, pas de MMR ici) :
+-- alimenté par POST /api/rewards/solo-match, indépendamment du plafond
+-- quotidien de la récompense en monnaie (les stats comptent toujours).
+CREATE TABLE solo_stats (
+  user_id INT PRIMARY KEY,
+  wins INT NOT NULL DEFAULT 0,
+  losses INT NOT NULL DEFAULT 0,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
