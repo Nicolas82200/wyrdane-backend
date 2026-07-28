@@ -1,5 +1,4 @@
 import { Request, Response } from "express";
-import type { JwtPayload } from "jsonwebtoken";
 
 import {
 	getStats,
@@ -9,13 +8,7 @@ import {
 	confirmMatch,
 	getLeaderboard,
 } from "../model/rankedModel";
-
-const getUserId = (req: Request): number | null => {
-	const payload = req.user as JwtPayload | undefined;
-	if (!payload || typeof payload.id === "undefined") return null;
-	const id = Number(payload.id);
-	return Number.isNaN(id) ? null : id;
-};
+import { getUserId } from "../helper/requestUser";
 
 const reportMatch = async (req: Request, res: Response): Promise<void> => {
 	try {
