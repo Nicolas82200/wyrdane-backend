@@ -15,7 +15,7 @@ services:
       - mysql_data:/var/lib/mysql
       # Import automatique au tout premier démarrage (dossier vide = fresh install)
       - ./backend/src/database/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
-      - ./backend/cards_data.sql:/docker-entrypoint-initdb.d/02-cards_data.sql:ro
+      - ./backend/src/database/cards_data.sql:/docker-entrypoint-initdb.d/02-cards_data.sql:ro
     ports:
       # N'expose MySQL QUE sur localhost (127.0.0.1), jamais sur 0.0.0.0
       - "127.0.0.1:3306:3306"
