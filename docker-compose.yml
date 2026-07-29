@@ -1,0 +1,58 @@
+# /var/www/wyrdane-backend/docker-compose.yml
+# Usage : docker compose up -d --build
+
+services:
+  mysql:
+    image: mysql:8
+    container_name: wyrdane-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${DB_NAME}
+      MYSQL_USER: ${DB_USER}
+      MYSQL_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - mysql_data:/var/lib/mysql
+      # Import automatique au tout premier démarrage (dossier vide = fresh install)
+      - ./backend/src/database/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ./backend/cards_data.sql:/docker-entrypoint-initdb.d/02-cards_data.sql:ro
+    ports:
+      # N'expose MySQL QUE sur localhost (127.0.0.1), jamais sur 0.0.0.0
+      - "127.0.0.1:3306:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: wyrdane-api
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      FRONTEND_URL: ${FRONTEND_URL}
+      BACKEND_URL: ${BACKEND_URL}
+      DB_HOST: mysql          # nom du service ci-dessus = résolution DNS interne Docker
+      DB_PORT: 3306
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: ${DB_NAME}
+      DB_SSL: "false"         # connexion interne Docker, pas besoin de SSL
+      TOKEN_SECRET: ${TOKEN_SECRET}
+      STEAM_WEB_API_KEY: ${STEAM_WEB_API_KEY}
+      STEAM_APP_ID: ${STEAM_APP_ID}
+      DEV_GRANT_ALL_CARDS: "false"
+      DEV_SKIP_STEAM_VERIFY: "false"
+    ports:
+      # Exposé uniquement sur localhost -> Nginx (natif) fait le proxy vers ici
+      - "127.0.0.1:3000:3000"
+
+volumes:
+  mysql_data:
