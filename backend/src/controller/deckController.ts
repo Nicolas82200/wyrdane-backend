@@ -1,5 +1,4 @@
 import { Request, Response } from "express";
-import type { JwtPayload } from "jsonwebtoken";
 
 import {
 	findByUserId,
@@ -10,17 +9,8 @@ import {
 	replaceCards,
 	deleteDeck,
 } from "../model/decksModel";
-import { findMissing } from "../model/collectionModel";
-
-// Doit rester alignée avec MAX_COPIES_PER_CARD du deckbuilder (site web).
-const MAX_COPIES_PER_CARD = 4;
-
-const getUserId = (req: Request): number | null => {
-	const payload = req.user as JwtPayload | undefined;
-	if (!payload || typeof payload.id === "undefined") return null;
-	const id = Number(payload.id);
-	return Number.isNaN(id) ? null : id;
-};
+import { findMissing, MAX_COPIES_PER_CARD } from "../model/collectionModel";
+import { getUserId } from "../helper/requestUser";
 
 const getUserDecks = async (req: Request, res: Response): Promise<void> => {
 	try {

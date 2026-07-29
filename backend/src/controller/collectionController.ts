@@ -1,5 +1,4 @@
 import { Request, Response } from "express";
-import type { JwtPayload } from "jsonwebtoken";
 
 import db from "../model/db";
 import { findByUserId, grantCard, findIdsByName, buyCard as buyCardModel, CardNotPurchasableError } from "../model/collectionModel";
@@ -7,13 +6,7 @@ import { InsufficientFundsError } from "../model/currencyModel";
 import { create as createDeck, replaceCards } from "../model/decksModel";
 import { hasClaimedStarter, markStarterClaimed } from "../model/userModel";
 import { STARTER_DECKS } from "../data/starterDecks";
-
-const getUserId = (req: Request): number | null => {
-	const payload = req.user as JwtPayload | undefined;
-	if (!payload || typeof payload.id === "undefined") return null;
-	const id = Number(payload.id);
-	return Number.isNaN(id) ? null : id;
-};
+import { getUserId } from "../helper/requestUser";
 
 const getCollection = async (req: Request, res: Response): Promise<void> => {
 	try {

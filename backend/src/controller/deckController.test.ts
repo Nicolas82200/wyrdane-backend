@@ -12,6 +12,7 @@ vi.mock("../model/decksModel", () => ({
 }));
 vi.mock("../model/collectionModel", () => ({
 	findMissing: vi.fn(),
+	MAX_COPIES_PER_CARD: 4,
 }));
 
 import { findById, create, updateName, replaceCards, deleteDeck } from "../model/decksModel";

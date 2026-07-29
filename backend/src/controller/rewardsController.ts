@@ -1,8 +1,8 @@
 import { Request, Response } from "express";
-import type { JwtPayload } from "jsonwebtoken";
 
 import { credit, getBalance, countReasonToday } from "../model/currencyModel";
 import { incrementResult } from "../model/soloStatsModel";
+import { getUserId } from "../helper/requestUser";
 
 const SOLO_WIN_REWARD = 25;
 const SOLO_WIN_DAILY_CAP = 5;
@@ -11,13 +11,6 @@ const SOLO_WIN_REASON = "match_win_solo";
 const SOLO_DEFEAT_REWARD = 10;
 const SOLO_DEFEAT_DAILY_CAP = 5;
 const SOLO_DEFEAT_REASON = "match_loss_solo";
-
-const getUserId = (req: Request): number | null => {
-	const payload = req.user as JwtPayload | undefined;
-	if (!payload || typeof payload.id === "undefined") return null;
-	const id = Number(payload.id);
-	return Number.isNaN(id) ? null : id;
-};
 
 // Un match solo/vs IA n'a pas de second client pour contredire un rapport
 // menteur (contrairement au flux ranked, à double rapport) : la récompense
