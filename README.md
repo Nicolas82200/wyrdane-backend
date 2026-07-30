@@ -38,6 +38,12 @@ npm run dev
 
 Importer `backend/src/database/schema.sql` puis `cards_data.sql` dans la base MySQL avant le premier lancement.
 
+## Déploiement
+
+En prod, le backend tourne en **Docker Compose** (MySQL + API) sur un **VPS OVH** (`api.wyrdane.com`), derrière un reverse proxy Nginx en HTTPS (Let's Encrypt). Le site compagnon `wyrdane-website` est hébergé sur le même VPS.
+
+Le déploiement est **continu** : tout push sur `main` déclenche automatiquement (GitHub Actions) `git pull` + rebuild des conteneurs sur le serveur — aucune action manuelle nécessaire après un merge. Détails complets de l'infra (sécurité, CI/CD, structure des fichiers Docker) dans `CLAUDE.md`.
+
 ## Origine
 
 Ce backend est issu d'une copie du backend d'un projet de formation (deck builder MySQL/Express), adapté pour devenir le backend commun du jeu Wyrdane : authentification remplacée par Steam, schéma étendu pour la progression persistante (classement, collection, boutique).
