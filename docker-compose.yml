@@ -50,6 +50,12 @@ services:
       STEAM_APP_ID: ${STEAM_APP_ID}
       DEV_GRANT_ALL_CARDS: "false"
       DEV_SKIP_STEAM_VERIFY: "false"
+      SMTP_HOST: ${SMTP_HOST}
+      SMTP_PORT: ${SMTP_PORT}
+      SMTP_SECURE: ${SMTP_SECURE}
+      SMTP_USER: ${SMTP_USER}
+      SMTP_PASS: ${SMTP_PASS}
+      CONTACT_EMAIL_TO: ${CONTACT_EMAIL_TO}
     ports:
       # Exposé uniquement sur localhost -> Nginx (natif) fait le proxy vers ici
       - "127.0.0.1:3000:3000"
