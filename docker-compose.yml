@@ -55,6 +55,7 @@ services:
       SMTP_SECURE: ${SMTP_SECURE}
       SMTP_USER: ${SMTP_USER}
       SMTP_PASS: ${SMTP_PASS}
+      SMTP_FROM: ${SMTP_FROM}
       CONTACT_EMAIL_TO: ${CONTACT_EMAIL_TO}
     ports:
       # Exposé uniquement sur localhost -> Nginx (natif) fait le proxy vers ici

@@ -20,10 +20,14 @@ type SendMailOptions = {
 	text: string;
 };
 
+// SMTP_FROM (adresse expéditeur validée côté fournisseur, ex. Brevo "Senders")
+// est volontairement distinct de SMTP_USER (identifiant d'authentification
+// SMTP) : la plupart des relais SMTP transactionnels rejettent l'envoi si le
+// "from" n'est pas un expéditeur vérifié séparément.
 const sendMail = async ({ replyTo, subject, text }: SendMailOptions): Promise<void> => {
 	const transporter = buildTransporter();
 	await transporter.sendMail({
-		from: process.env.SMTP_USER,
+		from: process.env.SMTP_FROM,
 		to: process.env.CONTACT_EMAIL_TO,
 		replyTo,
 		subject,
