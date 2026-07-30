@@ -3,6 +3,7 @@ import authorization from "../middleware/auth";
 import authRouter from "./authRouter";
 import cardRouter from "./cardRouter";
 import collectionRouter from "./collectionRouter";
+import contactRouter from "./contactRouter";
 import currencyRouter from "./currencyRouter";
 import deckRouter from "./deckRouter";
 import packRouter from "./packRouter";
@@ -19,6 +20,7 @@ router.use("/auth", authRouter);
 
 router.use("/cards", authorization, cardRouter);
 router.use("/collection", authorization, collectionRouter);
+router.use("/contact", contactRouter);
 router.use("/currency", authorization, currencyRouter);
 router.use("/decks", authorization, deckRouter);
 router.use("/packs", authorization, packRouter);
