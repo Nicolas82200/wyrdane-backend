@@ -38,7 +38,7 @@ export const STARTER_DECKS: StarterDeck[] = [
 			{ name: "Hurleur Nécrotique", quantity: 2 },
 			{ name: "Rongeur de Chair", quantity: 2 },
 			{ name: "Géant Boursouflé", quantity: 2 },
-			{ name: "Éclat d'Âme", quantity: 10 },
+			{ name: "Chair", quantity: 10 },
 		],
 	},
 	{
@@ -84,7 +84,7 @@ export const STARTER_DECKS: StarterDeck[] = [
 			{ name: "Vague de Corruption", quantity: 2 },
 			{ name: "Cavalier des Flammes", quantity: 2 },
 			{ name: "Le Corrupteur", quantity: 1 },
-			{ name: "Fragment de Pacte", quantity: 10 },
+			{ name: "Âme", quantity: 10 },
 		],
 	},
 	{
