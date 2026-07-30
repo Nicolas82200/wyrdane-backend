@@ -66,6 +66,24 @@ Le trigger pour l'existence de ce backend : trois features prévues côté jeu q
 Déjà en place : auth Steam, gestion des decks (CRUD), catalogue de cartes.
 À faire : tables/routes pour MMR, déblocages de collection, et ledger d'achats boutique.
 
+## Déploiement / Infra (VPS)
+
+Depuis le 2026-07-29, le backend tourne en prod sur un **VPS OVH** (`137.74.163.226`, Ubuntu, `api.wyrdane.com`) — plus sur Render (service Render conservé temporairement en secours, à couper une fois la prod VPS confirmée stable). Le site compagnon `wyrdane-website` (`wyrdane.com`) est hébergé sur le **même VPS**. Procédure d'installation complète (DNS, setup serveur, bugs rencontrés) : `C:\Users\ninou\Desktop\Wyrdane\Info\recap-deploiement-vps-wyrdane.md`.
+
+### Stack sur le VPS
+- **Utilisateur `deploy`** : pas de mot de passe (auth SSH par clé uniquement), dans les groupes `sudo` (mais sudo impossible sans mot de passe — toute commande root passe par le compte `ubuntu`) et `docker`.
+- **Backend** : Docker Compose (`docker-compose.yml` à la racine du repo, cloné dans `/var/www/wyrdane-backend`) — service `mysql` (MySQL 8, volume persistant, exposé uniquement sur `127.0.0.1:3306`) + service `backend` (build depuis `backend/Dockerfile`, exposé sur `127.0.0.1:3000`). Le `.env` réel (secrets DB, `TOKEN_SECRET`, `STEAM_WEB_API_KEY`...) vit uniquement sur le VPS, jamais commité, permissions `600`.
+- **Reverse proxy** : Nginx natif (hors Docker) fait le proxy HTTPS → `127.0.0.1:3000`, config dans `/etc/nginx/sites-available/api.wyrdane.com`. Certificats **Let's Encrypt** via Certbot (`certbot.timer` gère le renouvellement auto).
+- **Sécurité** : pare-feu `ufw` actif (seuls 22/80/443 ouverts en entrée, tout le reste deny par défaut, MySQL explicitement bloqué en externe), `fail2ban` installé et actif (jail `sshd`, ban après 5 échecs/10min), `unattended-upgrades` actif pour les patchs de sécurité auto, SSH en clé uniquement (`PasswordAuthentication no`).
+
+### Déploiement continu (CI/CD)
+Un script `deploy-backend.sh` (à la racine du repo, sur le VPS) fait `git pull origin main && docker compose up -d --build`. Le workflow GitHub Actions `.github/workflows/deploy.yml` (action `appleboy/ssh-action`) se connecte en SSH au VPS et lance ce script à chaque push sur `main` — **tout push sur `main` redéploie automatiquement la prod**, aucune action manuelle nécessaire. Secrets du repo GitHub : `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY` (clé dédiée `wyrdane-ci-deploy`, ed25519 sans passphrase, distincte des clés personnelles).
+
+Pour toute intervention manuelle ponctuelle sur le VPS nécessitant un accès SSH temporaire (pas de clé permanente disponible en session agent — les clés `~/.ssh/id_ed25519`/`wyrdane_vps` sont protégées par une passphrase que l'agent n'a pas) : générer une clé ed25519 temporaire sans passphrase, demander à l'utilisateur de l'ajouter lui-même aux `authorized_keys` du compte `deploy` (tâches courantes) ou `ubuntu` (tâches nécessitant sudo), puis la retirer des `authorized_keys` distants et la supprimer localement une fois le travail terminé.
+
+### `keep-alive.yml` obsolète
+`.github/workflows/keep-alive.yml` (ping périodique de l'URL Render pour éviter la mise en veille du plan gratuit) est devenu obsolète depuis le passage au VPS — à supprimer une fois le service Render définitivement coupé.
+
 ## Conventions de code
 
 - TypeScript strict, pattern `router → controller → model` déjà en place à respecter pour toute nouvelle feature (pas de logique SQL dans les controllers, pas de logique HTTP dans les modèles)
