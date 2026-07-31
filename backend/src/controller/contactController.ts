@@ -62,7 +62,7 @@ const submitContact = async (req: Request, res: Response): Promise<void> => {
 
 		await sendMail({
 			replyTo: email,
-			subject: `[Wyrdane] ${CATEGORY_LABELS[category]} - ${name}`,
+			subject: `[Wyrdane] ${CATEGORY_LABELS[category]} - ${name} <${email}>`,
 			text: lines.join("\n"),
 		});
 
