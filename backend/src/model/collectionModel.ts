@@ -101,8 +101,23 @@ const findIdsByName = async (
 	return new Map(rows.map((row) => [row.name, row.id]));
 };
 
+// Résout le card_type de chaque id demandé (utilisé pour exempter les
+// cartes-ressource des plafonds de possession/copies, voir findMissing et
+// deckController.save côté client Godot DeckManager/DeckBuilder).
+const findCardTypes = async (cardIds: number[]): Promise<Map<number, string>> => {
+	if (cardIds.length === 0) return new Map();
+	const [rows] = await db.query<(RowDataPacket & { id: number; card_type: string })[]>(
+		"SELECT id, card_type FROM cards WHERE id IN (?)",
+		[cardIds],
+	);
+	return new Map(rows.map((row) => [row.id, row.card_type]));
+};
+
 // Vérifie que le joueur possède au moins la quantité demandée pour chaque
 // entrée. Renvoie la liste des entrées en défaut (vide si tout est possédé).
+// Les cartes-ressource sont exemptées : quantité illimitée dans un deck, sans
+// lien avec ce qui est possédé en collection (voir README « Système de
+// Ressources par Race » côté client).
 const findMissing = async (
 	userId: number,
 	entries: { cardId: number; quantity: number }[],
@@ -114,8 +129,11 @@ const findMissing = async (
 		[userId, entries.map((e) => e.cardId)],
 	);
 	const owned = new Map(rows.map((row) => [row.card_id, row.quantity]));
+	const cardTypes = await findCardTypes(entries.map((e) => e.cardId));
 
-	return entries.filter((e) => (owned.get(e.cardId) ?? 0) < e.quantity);
+	return entries.filter(
+		(e) => cardTypes.get(e.cardId) !== "Ressource" && (owned.get(e.cardId) ?? 0) < e.quantity,
+	);
 };
 
 const getOwnedQuantity = async (userId: number, cardId: number): Promise<number> => {
@@ -173,6 +191,7 @@ export {
 	grantAllCards,
 	findIdsByName,
 	findMissing,
+	findCardTypes,
 	getOwnedQuantity,
 	buyCard,
 	CardNotPurchasableError,

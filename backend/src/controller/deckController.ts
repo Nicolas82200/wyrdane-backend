@@ -9,7 +9,7 @@ import {
 	replaceCards,
 	deleteDeck,
 } from "../model/decksModel";
-import { findMissing, MAX_COPIES_PER_CARD } from "../model/collectionModel";
+import { findMissing, findCardTypes, MAX_COPIES_PER_CARD } from "../model/collectionModel";
 import { getUserId } from "../helper/requestUser";
 
 const getUserDecks = async (req: Request, res: Response): Promise<void> => {
@@ -81,7 +81,12 @@ const save = async (req: Request, res: Response): Promise<void> => {
 			return;
 		}
 
-		const overLimit = entries.filter((e) => e.quantity > MAX_COPIES_PER_CARD);
+		// Cartes-ressource exemptées : quantité illimitée dans un deck (voir
+		// README « Système de Ressources par Race » côté client).
+		const cardTypes = await findCardTypes(entries.map((e) => e.cardId));
+		const overLimit = entries.filter(
+			(e) => cardTypes.get(e.cardId) !== "Ressource" && e.quantity > MAX_COPIES_PER_CARD,
+		);
 		if (overLimit.length > 0) {
 			res.status(400).json({
 				message: `Maximum ${MAX_COPIES_PER_CARD} exemplaires par carte`,

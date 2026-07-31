@@ -12,11 +12,12 @@ vi.mock("../model/decksModel", () => ({
 }));
 vi.mock("../model/collectionModel", () => ({
 	findMissing: vi.fn(),
+	findCardTypes: vi.fn(),
 	MAX_COPIES_PER_CARD: 4,
 }));
 
 import { findById, create, updateName, replaceCards, deleteDeck } from "../model/decksModel";
-import { findMissing } from "../model/collectionModel";
+import { findMissing, findCardTypes } from "../model/collectionModel";
 import { save, remove } from "./deckController";
 
 const mocked = {
@@ -26,6 +27,7 @@ const mocked = {
 	replaceCards: replaceCards as ReturnType<typeof vi.fn>,
 	deleteDeck: deleteDeck as ReturnType<typeof vi.fn>,
 	findMissing: findMissing as ReturnType<typeof vi.fn>,
+	findCardTypes: findCardTypes as ReturnType<typeof vi.fn>,
 };
 
 const mockRes = (): Response => {
@@ -37,7 +39,10 @@ const mockRes = (): Response => {
 };
 
 describe("save (deck create/update)", () => {
-	beforeEach(() => vi.resetAllMocks());
+	beforeEach(() => {
+		vi.resetAllMocks();
+		mocked.findCardTypes.mockResolvedValue(new Map());
+	});
 
 	it("rejects entries that exceed the max copies per card", async () => {
 		mocked.findMissing.mockResolvedValue([]);
@@ -67,6 +72,23 @@ describe("save (deck create/update)", () => {
 
 		expect(res.status).toHaveBeenCalledWith(400);
 		expect(mocked.create).not.toHaveBeenCalled();
+	});
+
+	it("exempts resource cards from the max copies per card limit", async () => {
+		mocked.findMissing.mockResolvedValue([]);
+		mocked.findCardTypes.mockResolvedValue(new Map([[1, "Ressource"]]));
+		mocked.create.mockResolvedValue(42);
+		const req = {
+			user: { id: 1 },
+			params: {},
+			body: { name: "Mon deck", entries: [{ cardId: 1, quantity: 10 }] },
+		} as unknown as Request;
+		const res = mockRes();
+
+		await save(req, res);
+
+		expect(mocked.create).toHaveBeenCalledWith(1, "Mon deck");
+		expect(res.status).toHaveBeenCalledWith(200);
 	});
 
 	it("refuses to update a deck owned by another player", async () => {
