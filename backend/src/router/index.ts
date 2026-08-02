@@ -9,6 +9,7 @@ import deckRouter from "./deckRouter";
 import packRouter from "./packRouter";
 import profileRouter from "./profileRouter";
 import rankedRouter from "./rankedRouter";
+import reportsRouter from "./reportsRouter";
 import rewardsRouter from "./rewardsRouter";
 import shopRouter from "./shopRouter";
 import userRouter from "./userRouter";
@@ -26,6 +27,7 @@ router.use("/decks", authorization, deckRouter);
 router.use("/packs", authorization, packRouter);
 router.use("/profile", authorization, profileRouter);
 router.use("/ranked", authorization, rankedRouter);
+router.use("/reports", authorization, reportsRouter);
 router.use("/rewards", authorization, rewardsRouter);
 router.use("/shop", authorization, shopRouter);
 
