@@ -87,7 +87,18 @@ Depuis le 2026-07-29, le backend tourne en prod sur un **VPS OVH** (`137.74.163.
 ### Déploiement continu (CI/CD)
 Un script `deploy-backend.sh` (à la racine du repo, sur le VPS) fait `git pull origin main && docker compose up -d --build`. Le workflow GitHub Actions `.github/workflows/deploy.yml` (action `appleboy/ssh-action`) se connecte en SSH au VPS et lance ce script à chaque push sur `main` — **tout push sur `main` redéploie automatiquement la prod**, aucune action manuelle nécessaire. Secrets du repo GitHub : `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY` (clé dédiée `wyrdane-ci-deploy`, ed25519 sans passphrase, distincte des clés personnelles).
 
-Pour toute intervention manuelle ponctuelle sur le VPS nécessitant un accès SSH temporaire (pas de clé permanente disponible en session agent — les clés `~/.ssh/id_ed25519`/`wyrdane_vps` sont protégées par une passphrase que l'agent n'a pas) : générer une clé ed25519 temporaire sans passphrase, demander à l'utilisateur de l'ajouter lui-même aux `authorized_keys` du compte `deploy` (tâches courantes) ou `ubuntu` (tâches nécessitant sudo), puis la retirer des `authorized_keys` distants et la supprimer localement une fois le travail terminé.
+Pour toute intervention manuelle ponctuelle sur le VPS nécessitant un accès SSH temporaire (pas de clé permanente disponible en session agent — les clés `~/.ssh/id_ed25519`/`wyrdane_vps` sont protégées par une passphrase que l'agent n'a pas) : générer une clé ed25519 temporaire sans passphrase, demander à l'utilisateur de l'ajouter lui-même aux `authorized_keys` du compte `deploy` (tâches courantes) ou `ubuntu` (tâches nécessitant sudo), puis la retirer des `authorized_keys` distants et la supprimer localement une fois le travail terminé. `deploy` suffit pour toute commande `docker compose ...` (groupe `docker`) — `ubuntu` n'est nécessaire que pour du vrai root.
+
+### Appliquer un changement de schéma en prod (après un ajout de table)
+
+`npm run db:sync` (voir `backend/src/database/sync.ts`) ne fonctionne **qu'en dev**, jamais tel quel dans le conteneur de prod : ce script utilise `tsx` pour exécuter `src/database/sync.ts` directement, or `tsx` est une devDependency absente de l'image de prod (`Dockerfile`, `npm ci --omit=dev`). La bonne commande en conteneur est le JS déjà compilé par `tsc` au build :
+
+```bash
+cd /var/www/wyrdane-backend
+docker compose exec backend node dist/database/sync.js
+```
+
+(`db:migrate`/`dist/database/migrate.js` de la même façon, mais c'est une commande destructive réservée au dev/CI — jamais contre la base de prod.)
 
 ### `keep-alive.yml` obsolète
 `.github/workflows/keep-alive.yml` (ping périodique de l'URL Render pour éviter la mise en veille du plan gratuit) est devenu obsolète depuis le passage au VPS — à supprimer une fois le service Render définitivement coupé.
