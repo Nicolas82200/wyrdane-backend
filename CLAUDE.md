@@ -60,7 +60,15 @@ npm run dev          # tsx watch src/index.ts, port défini par PORT (.env)
 
 Le trigger pour l'existence de ce backend : trois features prévues côté jeu qui ont besoin d'un état serveur autoritatif — classement (ranked), collection de cartes débloquée persistante, boutique de cosmétiques (Steamworks Microtransactions exige un serveur pour finaliser chaque transaction, `FinalizeTxn`).
 
-Déjà en place : auth Steam, gestion des decks (CRUD), catalogue de cartes, collection persistante + monnaie molle + boutique de packs, classement ranked (MMR Elo, double-report de match, leaderboard), boutique de cosmétiques (ledger d'achats Steamworks Microtransactions), récompense de connexion quotidienne (voir « Récompense de connexion quotidienne » ci-dessous). Quêtes quotidiennes développées en parallèle sur la branche `0033-daily-quests`, pas encore mergée au moment d'écrire ceci.
+Déjà en place : auth Steam, gestion des decks (CRUD), catalogue de cartes, collection persistante + monnaie molle + boutique de packs, classement ranked (MMR Elo, double-report de match, leaderboard), boutique de cosmétiques (ledger d'achats Steamworks Microtransactions), quêtes quotidiennes (voir « Quêtes quotidiennes » ci-dessous), récompense de connexion quotidienne (voir « Récompense de connexion quotidienne » ci-dessous).
+
+### Quêtes quotidiennes
+
+Table `daily_quests` (une ligne par joueur/jour/slot, 3 slots) — le **contenu** des quêtes (`QUEST_TEMPLATES`) vit en code dans `questModel.ts`, pas en base : seule l'assignation/progression par joueur y est stockée. Assignation paresseuse au premier appel du jour (`ensureTodayQuests`, même pattern que `rankedModel.getStats`/`solo_stats`), rotation déterministe par `userId + jour` (pas de RNG stocké, le même triplet de quêtes est recalculable sans lire la base).
+
+Progression branchée directement dans les points d'entrée de fin de match existants plutôt que via un nouvel endpoint de télémétrie : `rewardsController.reportSoloMatch` (mode `"solo"`) et `rankedController.reportMatch` une fois `confirmMatch` réussi (mode `"ranked"`, les deux joueurs progressent avec leur propre résultat gagnant/perdant). Trois objectifs pour l'instant, tous dérivables de ces données déjà disponibles côté serveur (aucun nouveau champ envoyé par le client) : `play` (toute partie terminée), `win` (victoire, tout mode), `win_ranked` (victoire classée). `GET /api/quests/daily` / `POST /api/quests/:id/claim` (réclamation verrouillée par `FOR UPDATE`, même garde-fou anti-double-clic que `currencyModel.debit`).
+
+Volontairement pas encore fait : objectifs par race/nombre de cartes jouées (demanderait une nouvelle télémétrie côté client `card-game`, non ajoutée pour garder ce premier jet sans changement client). Contrat détaillé à l'origine de cette feature : `E:\card-game\docs\backend-contracts\ranked-matchmaking-and-retention.md` (implémentation finale simplifiée par rapport à ce document — pas de nouvel endpoint `/api/matches/summary`, réutilisation des endpoints de fin de match existants).
 
 ### Récompense de connexion quotidienne
 

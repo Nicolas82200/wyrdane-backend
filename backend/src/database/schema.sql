@@ -5,6 +5,7 @@ USE wyrdane_game;
 DROP TABLE IF EXISTS deck_cards;
 DROP TABLE IF EXISTS decks;
 DROP TABLE IF EXISTS user_cards;
+DROP TABLE IF EXISTS daily_quests;
 DROP TABLE IF EXISTS login_rewards;
 DROP TABLE IF EXISTS match_reports;
 DROP TABLE IF EXISTS match_history;
@@ -156,6 +157,25 @@ CREATE TABLE match_reports (
   FOREIGN KEY (opponent_id) REFERENCES users(id) ON DELETE CASCADE,
   FOREIGN KEY (winner_id) REFERENCES users(id) ON DELETE CASCADE,
   UNIQUE KEY unique_match_reporter (client_match_id, reporter_id)
+);
+
+-- Assignation/progression des 3 quêtes quotidiennes d'un joueur (le contenu
+-- des quêtes elles-mêmes — QUEST_TEMPLATES — vit en code, pas ici). Assignées
+-- paresseusement au premier appel du jour (voir questModel.ensureTodayQuests),
+-- pas par un job planifié.
+CREATE TABLE daily_quests (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  user_id INT NOT NULL,
+  quest_date DATE NOT NULL,
+  slot TINYINT NOT NULL,
+  quest_code VARCHAR(30) NOT NULL,
+  progress INT NOT NULL DEFAULT 0,
+  target INT NOT NULL,
+  reward_currency INT NOT NULL,
+  claimed_at TIMESTAMP NULL DEFAULT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  UNIQUE KEY unique_user_quest_date_slot (user_id, quest_date, slot)
 );
 
 CREATE TABLE cosmetic_items (

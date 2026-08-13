@@ -9,6 +9,9 @@ vi.mock("../model/rankedModel", () => ({
 	confirmMatch: vi.fn(),
 	getLeaderboard: vi.fn(),
 }));
+vi.mock("../model/questModel", () => ({
+	progressForMatch: vi.fn(),
+}));
 
 import {
 	getStats,
@@ -18,6 +21,7 @@ import {
 	confirmMatch,
 	getLeaderboard,
 } from "../model/rankedModel";
+import { progressForMatch } from "../model/questModel";
 import { reportMatch, getMyStats, getLeaderboardHandler } from "./rankedController";
 
 const mocked = {
@@ -27,6 +31,7 @@ const mocked = {
 	createReport: createReport as ReturnType<typeof vi.fn>,
 	confirmMatch: confirmMatch as ReturnType<typeof vi.fn>,
 	getLeaderboard: getLeaderboard as ReturnType<typeof vi.fn>,
+	progressForMatch: progressForMatch as ReturnType<typeof vi.fn>,
 };
 
 const mockRes = (): Response => {
@@ -152,6 +157,31 @@ describe("reportMatch", () => {
 		expect(mocked.confirmMatch).toHaveBeenCalledWith("m1", 1, 2, 1);
 		expect(res.status).toHaveBeenCalledWith(200);
 		expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ status: "confirmed" }));
+	});
+
+	it("progresses quests for both players once confirmed, with the correct win/loss flag each", async () => {
+		mocked.findMatchHistory.mockResolvedValue(null);
+		mocked.findReport
+			.mockResolvedValueOnce(null)
+			.mockResolvedValueOnce({ opponent_id: 1, winner_id: 1 });
+		const req = reqAs(1, { clientMatchId: "m1", opponentId: 2, winnerId: 1 });
+		const res = mockRes();
+
+		await reportMatch(req, res);
+
+		expect(mocked.progressForMatch).toHaveBeenCalledWith(1, "ranked", true);
+		expect(mocked.progressForMatch).toHaveBeenCalledWith(2, "ranked", false);
+	});
+
+	it("does not progress quests when the match is only pending (one report)", async () => {
+		mocked.findMatchHistory.mockResolvedValue(null);
+		mocked.findReport.mockResolvedValueOnce(null).mockResolvedValueOnce(null);
+		const req = reqAs(1, { clientMatchId: "m1", opponentId: 2, winnerId: 1 });
+		const res = mockRes();
+
+		await reportMatch(req, res);
+
+		expect(mocked.progressForMatch).not.toHaveBeenCalled();
 	});
 });
 

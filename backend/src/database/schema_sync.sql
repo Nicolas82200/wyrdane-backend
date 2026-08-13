@@ -116,6 +116,21 @@ CREATE TABLE IF NOT EXISTS match_reports (
   UNIQUE KEY unique_match_reporter (client_match_id, reporter_id)
 );
 
+CREATE TABLE IF NOT EXISTS daily_quests (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  user_id INT NOT NULL,
+  quest_date DATE NOT NULL,
+  slot TINYINT NOT NULL,
+  quest_code VARCHAR(30) NOT NULL,
+  progress INT NOT NULL DEFAULT 0,
+  target INT NOT NULL,
+  reward_currency INT NOT NULL,
+  claimed_at TIMESTAMP NULL DEFAULT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  UNIQUE KEY unique_user_quest_date_slot (user_id, quest_date, slot)
+);
+
 CREATE TABLE IF NOT EXISTS cosmetic_items (
   id INT AUTO_INCREMENT PRIMARY KEY,
   steam_item_id VARCHAR(50) NOT NULL UNIQUE,

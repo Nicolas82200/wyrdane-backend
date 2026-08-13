@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 
 import { credit, getBalance, countReasonToday } from "../model/currencyModel";
 import { incrementResult } from "../model/soloStatsModel";
+import { progressForMatch } from "../model/questModel";
 import { getUserId } from "../helper/requestUser";
 
 const SOLO_WIN_REWARD = 25;
@@ -36,6 +37,7 @@ const reportSoloMatch = async (req: Request, res: Response): Promise<void> => {
 		const reason = result === "victory" ? SOLO_WIN_REASON : SOLO_DEFEAT_REASON;
 
 		await incrementResult(userId, result === "victory");
+		await progressForMatch(userId, "solo", result === "victory");
 
 		const alreadyToday = await countReasonToday(userId, reason);
 		if (alreadyToday >= dailyCap) {
