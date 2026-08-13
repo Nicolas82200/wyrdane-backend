@@ -8,6 +8,7 @@ import {
 	confirmMatch,
 	getLeaderboard,
 } from "../model/rankedModel";
+import { progressForMatch } from "../model/questModel";
 import { getUserId } from "../helper/requestUser";
 
 const reportMatch = async (req: Request, res: Response): Promise<void> => {
@@ -63,6 +64,10 @@ const reportMatch = async (req: Request, res: Response): Promise<void> => {
 		}
 
 		await confirmMatch(clientMatchId, userId, opponentId, winnerId);
+		// Une fois par joueur, jamais deux fois (confirmMatch ne s'exécute qu'une
+		// seule fois par match — voir le court-circuit findMatchHistory plus haut).
+		await progressForMatch(userId, "ranked", winnerId === userId);
+		await progressForMatch(opponentId, "ranked", winnerId === opponentId);
 		res.status(200).json({ status: "confirmed" });
 	} catch (error) {
 		console.error(error);

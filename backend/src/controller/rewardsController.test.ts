@@ -9,9 +9,13 @@ vi.mock("../model/currencyModel", () => ({
 vi.mock("../model/soloStatsModel", () => ({
 	incrementResult: vi.fn(),
 }));
+vi.mock("../model/questModel", () => ({
+	progressForMatch: vi.fn(),
+}));
 
 import { credit, getBalance, countReasonToday } from "../model/currencyModel";
 import { incrementResult } from "../model/soloStatsModel";
+import { progressForMatch } from "../model/questModel";
 import { reportSoloMatch } from "./rewardsController";
 
 const mocked = {
@@ -19,6 +23,7 @@ const mocked = {
 	getBalance: getBalance as ReturnType<typeof vi.fn>,
 	countReasonToday: countReasonToday as ReturnType<typeof vi.fn>,
 	incrementResult: incrementResult as ReturnType<typeof vi.fn>,
+	progressForMatch: progressForMatch as ReturnType<typeof vi.fn>,
 };
 
 const mockRes = (): Response => {
@@ -60,6 +65,16 @@ describe("reportSoloMatch", () => {
 		await reportSoloMatch(req, res);
 
 		expect(mocked.incrementResult).toHaveBeenCalledWith(1, true);
+	});
+
+	it("progresses quests independently of the currency daily cap", async () => {
+		mocked.countReasonToday.mockResolvedValue(5);
+		const req = reqAs(1, { result: "defeat" });
+		const res = mockRes();
+
+		await reportSoloMatch(req, res);
+
+		expect(mocked.progressForMatch).toHaveBeenCalledWith(1, "solo", false);
 	});
 
 	it("does not credit currency once the daily win cap is reached", async () => {
