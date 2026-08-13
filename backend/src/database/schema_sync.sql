@@ -82,6 +82,13 @@ CREATE TABLE IF NOT EXISTS solo_stats (
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS login_rewards (
+  user_id INT PRIMARY KEY,
+  streak_day INT NOT NULL DEFAULT 0,
+  last_claimed_date DATE NULL DEFAULT NULL,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS match_history (
   id INT AUTO_INCREMENT PRIMARY KEY,
   client_match_id VARCHAR(100) NOT NULL UNIQUE,

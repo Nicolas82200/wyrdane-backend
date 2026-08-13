@@ -6,6 +6,7 @@ DROP TABLE IF EXISTS deck_cards;
 DROP TABLE IF EXISTS decks;
 DROP TABLE IF EXISTS user_cards;
 DROP TABLE IF EXISTS daily_quests;
+DROP TABLE IF EXISTS login_rewards;
 DROP TABLE IF EXISTS match_reports;
 DROP TABLE IF EXISTS match_history;
 DROP TABLE IF EXISTS ranked_stats;
@@ -111,6 +112,18 @@ CREATE TABLE solo_stats (
   user_id INT PRIMARY KEY,
   wins INT NOT NULL DEFAULT 0,
   losses INT NOT NULL DEFAULT 0,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+-- Récompense de connexion quotidienne : streak_day compte les jours
+-- consécutifs (pas plafonné à 7, la récompense associée boucle modulo 7 côté
+-- code — voir loginRewardModel.REWARD_BY_DAY), last_claimed_date sert à
+-- déterminer si la série continue (hier), reset (avant-hier ou plus) ou déjà
+-- réclamée aujourd'hui, calculé via CURDATE() côté requête plutôt qu'en JS.
+CREATE TABLE login_rewards (
+  user_id INT PRIMARY KEY,
+  streak_day INT NOT NULL DEFAULT 0,
+  last_claimed_date DATE NULL DEFAULT NULL,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 

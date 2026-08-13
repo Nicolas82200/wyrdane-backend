@@ -60,7 +60,7 @@ npm run dev          # tsx watch src/index.ts, port défini par PORT (.env)
 
 Le trigger pour l'existence de ce backend : trois features prévues côté jeu qui ont besoin d'un état serveur autoritatif — classement (ranked), collection de cartes débloquée persistante, boutique de cosmétiques (Steamworks Microtransactions exige un serveur pour finaliser chaque transaction, `FinalizeTxn`).
 
-Déjà en place : auth Steam, gestion des decks (CRUD), catalogue de cartes, collection persistante + monnaie molle + boutique de packs, classement ranked (MMR Elo, double-report de match, leaderboard), boutique de cosmétiques (ledger d'achats Steamworks Microtransactions), quêtes quotidiennes (voir « Quêtes quotidiennes » ci-dessous).
+Déjà en place : auth Steam, gestion des decks (CRUD), catalogue de cartes, collection persistante + monnaie molle + boutique de packs, classement ranked (MMR Elo, double-report de match, leaderboard), boutique de cosmétiques (ledger d'achats Steamworks Microtransactions), quêtes quotidiennes (voir « Quêtes quotidiennes » ci-dessous), récompense de connexion quotidienne (voir « Récompense de connexion quotidienne » ci-dessous).
 
 ### Quêtes quotidiennes
 
@@ -68,7 +68,11 @@ Table `daily_quests` (une ligne par joueur/jour/slot, 3 slots) — le **contenu*
 
 Progression branchée directement dans les points d'entrée de fin de match existants plutôt que via un nouvel endpoint de télémétrie : `rewardsController.reportSoloMatch` (mode `"solo"`) et `rankedController.reportMatch` une fois `confirmMatch` réussi (mode `"ranked"`, les deux joueurs progressent avec leur propre résultat gagnant/perdant). Trois objectifs pour l'instant, tous dérivables de ces données déjà disponibles côté serveur (aucun nouveau champ envoyé par le client) : `play` (toute partie terminée), `win` (victoire, tout mode), `win_ranked` (victoire classée). `GET /api/quests/daily` / `POST /api/quests/:id/claim` (réclamation verrouillée par `FOR UPDATE`, même garde-fou anti-double-clic que `currencyModel.debit`).
 
-Volontairement pas encore fait : récompense de connexion quotidienne (feature distincte, pas démarrée), objectifs par race/nombre de cartes jouées (demanderait une nouvelle télémétrie côté client `card-game`, non ajoutée pour garder ce premier jet sans changement client). Contrat détaillé à l'origine de cette feature : `E:\card-game\docs\backend-contracts\ranked-matchmaking-and-retention.md` (implémentation finale simplifiée par rapport à ce document — pas de nouvel endpoint `/api/matches/summary`, réutilisation des endpoints de fin de match existants).
+Volontairement pas encore fait : objectifs par race/nombre de cartes jouées (demanderait une nouvelle télémétrie côté client `card-game`, non ajoutée pour garder ce premier jet sans changement client). Contrat détaillé à l'origine de cette feature : `E:\card-game\docs\backend-contracts\ranked-matchmaking-and-retention.md` (implémentation finale simplifiée par rapport à ce document — pas de nouvel endpoint `/api/matches/summary`, réutilisation des endpoints de fin de match existants).
+
+### Récompense de connexion quotidienne
+
+Table `login_rewards` (une ligne par joueur : `streak_day` + `last_claimed_date`). Pas de job planifié : `claimed_today`/`is_consecutive` sont calculés à la volée via `CURDATE()` côté SQL (jamais en comparant des dates côté app, pour éviter tout écart de fuseau horaire) — voir `loginRewardModel.fetchRow`. Récompense croissante sur 7 jours (`REWARD_BY_DAY`, 10 à 60 monnaie molle), qui boucle après le jour 7 plutôt que de plafonner ; `streak_day` en base continue lui de compter la série réelle sans plafond. Un jour manqué (dernière réclamation avant-hier ou plus tôt) reramène directement au palier 1. `GET /api/login-reward/status` (lecture seule, ne mute rien), `POST /api/login-reward/claim` (verrouillé `FOR UPDATE`, même garde-fou anti-double-réclamation que `currencyModel.debit`/`questModel.claimQuest`).
 
 ## Déploiement / Infra (VPS)
 
