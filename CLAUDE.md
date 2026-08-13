@@ -58,13 +58,13 @@ npm run dev          # tsx watch src/index.ts, port défini par PORT (.env)
 
 ## Roadmap (voir aussi la section correspondante dans `E:\card-game\CLAUDE.md`)
 
-Le trigger pour l'existence de ce backend : trois features prévues côté jeu qui ont besoin d'un état serveur autoritatif :
-- **Classement (ranked)** — MMR/leaderboard, ne doit pas être manipulable côté client
-- **Collection de cartes** — déblocage progressif persistant par joueur (pas juste la bibliothèque complète)
-- **Boutique de cosmétiques** — achats réels, l'API Steamworks Microtransactions exige un serveur pour finaliser chaque transaction (`FinalizeTxn`)
+Le trigger pour l'existence de ce backend : trois features prévues côté jeu qui ont besoin d'un état serveur autoritatif — classement (ranked), collection de cartes débloquée persistante, boutique de cosmétiques (Steamworks Microtransactions exige un serveur pour finaliser chaque transaction, `FinalizeTxn`).
 
-Déjà en place : auth Steam, gestion des decks (CRUD), catalogue de cartes.
-À faire : tables/routes pour MMR, déblocages de collection, et ledger d'achats boutique.
+Déjà en place : auth Steam, gestion des decks (CRUD), catalogue de cartes, collection persistante + monnaie molle + boutique de packs, classement ranked (MMR Elo, double-report de match, leaderboard), boutique de cosmétiques (ledger d'achats Steamworks Microtransactions), récompense de connexion quotidienne (voir « Récompense de connexion quotidienne » ci-dessous). Quêtes quotidiennes développées en parallèle sur la branche `0033-daily-quests`, pas encore mergée au moment d'écrire ceci.
+
+### Récompense de connexion quotidienne
+
+Table `login_rewards` (une ligne par joueur : `streak_day` + `last_claimed_date`). Pas de job planifié : `claimed_today`/`is_consecutive` sont calculés à la volée via `CURDATE()` côté SQL (jamais en comparant des dates côté app, pour éviter tout écart de fuseau horaire) — voir `loginRewardModel.fetchRow`. Récompense croissante sur 7 jours (`REWARD_BY_DAY`, 10 à 60 monnaie molle), qui boucle après le jour 7 plutôt que de plafonner ; `streak_day` en base continue lui de compter la série réelle sans plafond. Un jour manqué (dernière réclamation avant-hier ou plus tôt) reramène directement au palier 1. `GET /api/login-reward/status` (lecture seule, ne mute rien), `POST /api/login-reward/claim` (verrouillé `FOR UPDATE`, même garde-fou anti-double-réclamation que `currencyModel.debit`/`questModel.claimQuest`).
 
 ## Déploiement / Infra (VPS)
 
