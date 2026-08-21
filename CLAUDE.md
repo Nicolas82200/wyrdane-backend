@@ -55,6 +55,7 @@ npm run dev          # tsx watch src/index.ts, port défini par PORT (.env)
 
 - Importer `src/database/schema.sql` (puis `cards_data.sql`) dans une instance MySQL locale avant de lancer le serveur.
 - Copier `.env.sample` en `.env` et renseigner les identifiants MySQL + `TOKEN_SECRET` + `STEAM_WEB_API_KEY`/`STEAM_APP_ID`.
+- **Piège encodage** : le client CLI `mysql` (celui du conteneur `mysql:8`, pas le pool applicatif `mysql2`) négocie `character_set_client=latin1` par défaut faute de locale dans le conteneur — même si la colonne est en `utf8mb4`. Toute correction manuelle ponctuelle de données (`mysql ... < fichier.sql`) sans forcer l'encodage corrompt silencieusement les accents en écriture (mojibake type "Ã©"), déjà arrivé une fois sur `cards` (voir PR de fix associée, corrigée par un re-import avec le bon flag). Toujours ajouter `--default-character-set=utf8mb4` à toute invocation manuelle du client `mysql` en écriture. Le pool applicatif (`db.ts`) et `migrate.ts`/`sync.ts` déclarent maintenant `charset: "utf8mb4"` explicitement, donc ce risque ne concerne que les interventions manuelles ad-hoc, pas l'application elle-même.
 
 ## Roadmap (voir aussi la section correspondante dans `E:\card-game\CLAUDE.md`)
 

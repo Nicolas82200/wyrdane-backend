@@ -47,6 +47,7 @@ const main = async (): Promise<void> => {
 		password: DB_PASSWORD,
 		database: DB_NAME,
 		multipleStatements: true,
+		charset: "utf8mb4",
 		ssl: DB_SSL === "true" ? { rejectUnauthorized: false } : undefined,
 	});
 
