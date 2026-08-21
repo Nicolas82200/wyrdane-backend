@@ -30,6 +30,7 @@ const main = async (): Promise<void> => {
 		user: DB_USER,
 		password: DB_PASSWORD,
 		multipleStatements: true,
+		charset: "utf8mb4",
 		ssl: DB_SSL === "true" ? { rejectUnauthorized: false } : undefined,
 	});
 
