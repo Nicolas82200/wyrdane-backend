@@ -15,6 +15,9 @@ DROP TABLE IF EXISTS purchase_ledger;
 DROP TABLE IF EXISTS user_cosmetics;
 DROP TABLE IF EXISTS cosmetic_items;
 DROP TABLE IF EXISTS currency_ledger;
+DROP TABLE IF EXISTS site_visits;
+DROP TABLE IF EXISTS login_events;
+DROP TABLE IF EXISTS wishlist_stats;
 DROP TABLE IF EXISTS cards;
 DROP TABLE IF EXISTS linked_accounts;
 DROP TABLE IF EXISTS users;
@@ -31,7 +34,17 @@ CREATE TABLE users (
   -- (1000, voir currencyModel.claimStarterBonus) distinct de starter_claimed_at
   -- (cartes/decks) pour les comptes créés avant l'ajout de ce bonus, qui
   -- reçoivent désormais 1000 dès la création (voir userModel.createWithSteamAccount).
-  starter_currency_claimed_at TIMESTAMP NULL DEFAULT NULL
+  starter_currency_claimed_at TIMESTAMP NULL DEFAULT NULL,
+  -- Rempli par POST /api/currency/claim-first-login-bonus : quête cachée de
+  -- première connexion Steam (500, voir currencyModel.claimFirstLoginReward).
+  -- Appelée aussi bien depuis le site (après le callback OpenID) que depuis
+  -- le client Godot (LoadingScreen), les deux consommateurs de cette même API.
+  first_login_reward_claimed_at TIMESTAMP NULL DEFAULT NULL,
+  -- Rôle admin pour la page d'administration du site (dashboard analytics) :
+  -- volontairement absent du payload JWT (voir jwtHelper) et revérifié en base
+  -- à chaque requête admin, car le JWT reste valide jusqu'à 1h après un retrait
+  -- de droits.
+  is_admin BOOLEAN NOT NULL DEFAULT FALSE
 );
 
 -- Une ligne par identité liée (Steam aujourd'hui, potentiellement email/Google/Apple
@@ -224,3 +237,40 @@ CREATE TABLE currency_ledger (
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
   INDEX idx_currency_ledger_user_reason_date (user_id, reason, created_at)
 );
+
+-- Une ligne par requête de tracking envoyée par le site (POST
+-- /api/analytics/pageview, public, pas d'auth requise). visitor_id vient d'un
+-- cookie anonyme posé par ce même endpoint (voir analyticsModel.recordVisit) :
+-- permet de distinguer visites totales et visiteurs uniques (approximatifs,
+-- un même visiteur sans cookie -ou l'ayant effacé- recompte).
+CREATE TABLE site_visits (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  visitor_id VARCHAR(64) NOT NULL,
+  path VARCHAR(255) NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_site_visits_visitor (visitor_id),
+  INDEX idx_site_visits_created (created_at)
+);
+
+-- Une ligne par connexion Steam réussie (site OU jeu, voir authController
+-- loginWithSteamId), pour compter les connexions par origine dans le
+-- dashboard admin. Distinct de users.created_at (premier compte) : capture
+-- CHAQUE connexion, pas seulement la première.
+CREATE TABLE login_events (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  user_id INT NOT NULL,
+  source VARCHAR(10) NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  INDEX idx_login_events_source_date (source, created_at)
+);
+
+-- Ligne unique (id=1) : compteur de wishlists Steam saisi manuellement depuis
+-- la page admin. Pas d'API Steamworks publique fiable pour ce chiffre (visible
+-- uniquement dans le dashboard partenaire Steamworks) : voir adminModel.
+CREATE TABLE wishlist_stats (
+  id INT PRIMARY KEY DEFAULT 1,
+  count INT NOT NULL DEFAULT 0,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+INSERT INTO wishlist_stats (id, count) VALUES (1, 0);

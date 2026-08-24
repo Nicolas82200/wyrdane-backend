@@ -171,3 +171,28 @@ CREATE TABLE IF NOT EXISTS currency_ledger (
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
   INDEX idx_currency_ledger_user_reason_date (user_id, reason, created_at)
 );
+
+CREATE TABLE IF NOT EXISTS site_visits (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  visitor_id VARCHAR(64) NOT NULL,
+  path VARCHAR(255) NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_site_visits_visitor (visitor_id),
+  INDEX idx_site_visits_created (created_at)
+);
+
+CREATE TABLE IF NOT EXISTS login_events (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  user_id INT NOT NULL,
+  source VARCHAR(10) NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  INDEX idx_login_events_source_date (source, created_at)
+);
+
+CREATE TABLE IF NOT EXISTS wishlist_stats (
+  id INT PRIMARY KEY DEFAULT 1,
+  count INT NOT NULL DEFAULT 0,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+INSERT IGNORE INTO wishlist_stats (id, count) VALUES (1, 0);
