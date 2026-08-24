@@ -77,4 +77,26 @@ const markStarterClaimed = async (userId: number, connection?: PoolConnection): 
 	await runner.query("UPDATE `users` SET starter_claimed_at = NOW() WHERE id = ?", [userId]);
 };
 
-export { findOne, findBySteamId, createWithSteamAccount, hasClaimedStarter, markStarterClaimed };
+// Auto-répare le rôle admin à chaque connexion pour les steamid listés dans
+// ADMIN_STEAM_IDS (env, liste séparée par des virgules) : volontairement PAS
+// stocké uniquement en base, pour survivre à un reset de la BDD (fait pour
+// tester) sans avoir à repasser par une requête SQL manuelle. Ne retire
+// jamais is_admin (retrait = édition manuelle en base ou via le dashboard).
+const ensureAdminFromEnv = async (userId: number, steamId: string): Promise<void> => {
+	const adminSteamIds = (process.env.ADMIN_STEAM_IDS ?? "")
+		.split(",")
+		.map((id) => id.trim())
+		.filter(Boolean);
+	if (!adminSteamIds.includes(steamId)) return;
+
+	await db.query("UPDATE `users` SET is_admin = TRUE WHERE id = ?", [userId]);
+};
+
+export {
+	findOne,
+	findBySteamId,
+	createWithSteamAccount,
+	hasClaimedStarter,
+	markStarterClaimed,
+	ensureAdminFromEnv,
+};

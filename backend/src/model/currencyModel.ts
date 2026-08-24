@@ -14,6 +14,11 @@ class InsufficientFundsError extends Error {
 // bonus le reçoivent séparément via claimStarterBonus, plus bas.
 const STARTER_CURRENCY = 1000;
 
+// Quête cachée : 500 or accordés à la toute première connexion Steam d'un
+// compte (jeu ou site, peu importe lequel des deux clients déclenche l'appel
+// en premier — voir claimFirstLoginReward, idempotent).
+const FIRST_LOGIN_REWARD = 500;
+
 const getBalance = async (userId: number): Promise<number> => {
 	const [rows] = await db.query<(RowDataPacket & { soft_currency: number })[]>(
 		"SELECT soft_currency FROM users WHERE id = ?",
@@ -115,12 +120,51 @@ const claimStarterBonus = async (userId: number): Promise<{ credited: boolean; b
 	return { credited: true, balance: await getBalance(userId) };
 };
 
+// Voir POST /api/currency/claim-first-login-bonus. Idempotent comme
+// claimStarterBonus : un second appel (autre client, retry réseau) est un
+// no-op (credited: false).
+const hasClaimedFirstLoginReward = async (userId: number): Promise<boolean> => {
+	const [rows] = await db.query<(RowDataPacket & { first_login_reward_claimed_at: string | null })[]>(
+		"SELECT first_login_reward_claimed_at FROM users WHERE id = ?",
+		[userId],
+	);
+	return rows.length > 0 && rows[0].first_login_reward_claimed_at !== null;
+};
+
+const markFirstLoginRewardClaimed = async (userId: number, connection?: PoolConnection): Promise<void> => {
+	const runner: Pool | PoolConnection = connection ?? db;
+	await runner.query("UPDATE users SET first_login_reward_claimed_at = NOW() WHERE id = ?", [userId]);
+};
+
+const claimFirstLoginReward = async (userId: number): Promise<{ credited: boolean; balance: number }> => {
+	if (await hasClaimedFirstLoginReward(userId)) {
+		return { credited: false, balance: await getBalance(userId) };
+	}
+
+	const connection = await db.getConnection();
+	try {
+		await connection.beginTransaction();
+		await credit(userId, FIRST_LOGIN_REWARD, "first_login_reward", undefined, connection);
+		await markFirstLoginRewardClaimed(userId, connection);
+		await connection.commit();
+	} catch (error) {
+		await connection.rollback();
+		throw error;
+	} finally {
+		connection.release();
+	}
+
+	return { credited: true, balance: await getBalance(userId) };
+};
+
 export {
 	InsufficientFundsError,
 	STARTER_CURRENCY,
+	FIRST_LOGIN_REWARD,
 	getBalance,
 	credit,
 	debit,
 	countReasonToday,
 	claimStarterBonus,
+	claimFirstLoginReward,
 };

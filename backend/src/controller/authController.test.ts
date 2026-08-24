@@ -11,9 +11,13 @@ vi.mock("../helper/steamOpenIdHelper", () => ({
 vi.mock("../model/userModel", () => ({
 	findBySteamId: vi.fn(),
 	createWithSteamAccount: vi.fn(),
+	ensureAdminFromEnv: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock("../model/collectionModel", () => ({
 	grantAllCards: vi.fn(),
+}));
+vi.mock("../model/analyticsModel", () => ({
+	recordLogin: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock("../helper/jwtHelper", () => ({
 	encodeJWT: vi.fn(() => "signed.jwt.token"),
@@ -41,6 +45,7 @@ const mockRes = (): Response => {
 	res.clearCookie = vi.fn().mockReturnValue(res);
 	res.redirect = vi.fn().mockReturnValue(res);
 	res.sendStatus = vi.fn().mockReturnValue(res);
+	res.send = vi.fn().mockReturnValue(res);
 	return res;
 };
 
@@ -167,6 +172,31 @@ describe("steamOpenIdCallback", () => {
 		await steamOpenIdCallback(req, res);
 
 		expect(res.redirect).toHaveBeenCalledWith("https://wyrdane.example");
+	});
+
+	it("sends a postMessage/close page instead of redirecting when popup=1 and the assertion succeeds", async () => {
+		process.env.FRONTEND_URL = "https://wyrdane.example";
+		mocked.verifyAssertion.mockResolvedValue("76561198000000001");
+		mocked.findBySteamId.mockResolvedValue([{ id: 1, username: "X" }]);
+		const req = { query: { popup: "1" } } as unknown as Request;
+		const res = mockRes();
+
+		await steamOpenIdCallback(req, res);
+
+		expect(res.redirect).not.toHaveBeenCalled();
+		expect(res.send).toHaveBeenCalledWith(expect.stringContaining("wyrdane-steam-login"));
+		expect(res.send).toHaveBeenCalledWith(expect.stringContaining("success\":true"));
+	});
+
+	it("sends a postMessage/close page reporting failure when popup=1 and the assertion is invalid", async () => {
+		mocked.verifyAssertion.mockResolvedValue(null);
+		const req = { query: { popup: "1" } } as unknown as Request;
+		const res = mockRes();
+
+		await steamOpenIdCallback(req, res);
+
+		expect(res.status).not.toHaveBeenCalledWith(401);
+		expect(res.send).toHaveBeenCalledWith(expect.stringContaining("success\":false"));
 	});
 });
 

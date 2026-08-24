@@ -1,5 +1,8 @@
 import { Router } from "express";
 import authorization from "../middleware/auth";
+import requireAdmin from "../middleware/requireAdmin";
+import adminRouter from "./adminRouter";
+import analyticsRouter from "./analyticsRouter";
 import authRouter from "./authRouter";
 import cardRouter from "./cardRouter";
 import collectionRouter from "./collectionRouter";
@@ -20,6 +23,8 @@ const router = Router();
 router.use("/users", authorization, userRouter);
 router.use("/auth", authRouter);
 
+router.use("/admin", authorization, requireAdmin, adminRouter);
+router.use("/analytics", analyticsRouter);
 router.use("/cards", authorization, cardRouter);
 router.use("/collection", authorization, collectionRouter);
 router.use("/contact", contactRouter);

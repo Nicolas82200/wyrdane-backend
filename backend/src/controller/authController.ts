@@ -2,16 +2,20 @@ import { Request, Response } from "express";
 
 import { authenticateSteamTicket } from "../helper/steamHelper";
 import { buildAuthUrl, verifyAssertion } from "../helper/steamOpenIdHelper";
-import { findBySteamId, createWithSteamAccount } from "../model/userModel";
+import { findBySteamId, createWithSteamAccount, ensureAdminFromEnv } from "../model/userModel";
 import { grantAllCards } from "../model/collectionModel";
+import { recordLogin } from "../model/analyticsModel";
 import { encodeJWT } from "../helper/jwtHelper";
 
 // Retrouve (ou crée) le joueur associé à un steamid et pose le cookie de
 // session. Partagé par les deux flows Steam : ticket (client Godot) et
 // OpenID (site web) aboutissent tous les deux ici une fois le steamid vérifié.
+// `source` distingue l'origine de la connexion pour le dashboard admin
+// (login_events, voir analyticsModel) sans influer sur l'authentification.
 const loginWithSteamId = async (
 	res: Response,
 	steamId: string,
+	source: "site" | "game",
 ): Promise<{ id: number; username: string }> => {
 	const [existingUser] = await findBySteamId(steamId);
 	let user: { id: number; username: string } | undefined = existingUser;
@@ -25,6 +29,13 @@ const loginWithSteamId = async (
 			await grantAllCards(user.id);
 		}
 	}
+
+	Promise.resolve(recordLogin(user.id, source)).catch((error) =>
+		console.error("recordLogin failed", error),
+	);
+	Promise.resolve(ensureAdminFromEnv(user.id, steamId)).catch((error) =>
+		console.error("ensureAdminFromEnv failed", error),
+	);
 
 	const safeUser = { id: user.id, name: user.username };
 	const token = encodeJWT(safeUser);
@@ -60,7 +71,7 @@ const steamLogin = async (req: Request, res: Response): Promise<void> => {
 			return;
 		}
 
-		const user = await loginWithSteamId(res, steamId);
+		const user = await loginWithSteamId(res, steamId, "game");
 		res.status(200).json({ users: { id: user.id, name: user.username } });
 	} catch (error) {
 		console.error(error);
@@ -69,28 +80,61 @@ const steamLogin = async (req: Request, res: Response): Promise<void> => {
 };
 
 // Étape 1 du flow web "Sign in through Steam" (OpenID) : redirige le
-// navigateur vers Steam pour que le joueur s'y authentifie.
+// navigateur vers Steam pour que le joueur s'y authentifie. `?popup=1`
+// (posé par AuthPanel.tsx quand la connexion se fait dans une popup plutôt
+// qu'en pleine page) est répercuté dans returnTo : OpenID préserve les
+// paramètres de query déjà présents sur return_to, Steam se contente d'y
+// ajouter les siens (openid.*) au retour — voir steamOpenIdCallback.
 const steamOpenIdRedirect = (req: Request, res: Response): void => {
 	const backendUrl = process.env.BACKEND_URL as string;
-	const returnTo = `${backendUrl}/api/auth/steam/callback`;
+	const isPopup = req.query.popup === "1";
+	const returnTo = `${backendUrl}/api/auth/steam/callback${isPopup ? "?popup=1" : ""}`;
 	res.redirect(buildAuthUrl(returnTo, backendUrl));
+};
+
+// Page minimaliste renvoyée dans la popup de connexion (voir AuthPanel.tsx) :
+// prévient la fenêtre parente du résultat via postMessage puis se ferme
+// elle-même. targetOrigin=FRONTEND_URL (jamais "*") pour qu'un autre onglet
+// ouvert sur un autre site ne puisse pas intercepter le message.
+const sendPopupResult = (res: Response, success: boolean): void => {
+	const frontendUrl = JSON.stringify(process.env.FRONTEND_URL);
+	const payload = JSON.stringify({ source: "wyrdane-steam-login", success });
+	res.status(200).send(`<!DOCTYPE html><html><body><script>
+		if (window.opener) {
+			window.opener.postMessage(${payload}, ${frontendUrl});
+		}
+		window.close();
+	</script></body></html>`);
 };
 
 // Étape 2 : Steam redirige ici avec des paramètres openid.* signés, qu'on
 // revalide auprès de Steam avant de faire confiance au steamid renvoyé.
 const steamOpenIdCallback = async (req: Request, res: Response): Promise<void> => {
+	const isPopup = req.query.popup === "1";
 	try {
 		const query = req.query as Record<string, string>;
 		const steamId = await verifyAssertion(query);
 		if (!steamId) {
+			if (isPopup) {
+				sendPopupResult(res, false);
+				return;
+			}
 			res.status(401).json({ message: "Invalid Steam OpenID assertion" });
 			return;
 		}
 
-		await loginWithSteamId(res, steamId);
+		await loginWithSteamId(res, steamId, "site");
+		if (isPopup) {
+			sendPopupResult(res, true);
+			return;
+		}
 		res.redirect(process.env.FRONTEND_URL as string);
 	} catch (error) {
 		console.error(error);
+		if (isPopup) {
+			sendPopupResult(res, false);
+			return;
+		}
 		res.status(500).json({ message: "Server error" });
 	}
 };
