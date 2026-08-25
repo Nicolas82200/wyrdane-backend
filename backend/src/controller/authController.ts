@@ -1,8 +1,13 @@
 import { Request, Response } from "express";
 
-import { authenticateSteamTicket } from "../helper/steamHelper";
+import { authenticateSteamTicket, fetchSteamPersonaName } from "../helper/steamHelper";
 import { buildAuthUrl, verifyAssertion } from "../helper/steamOpenIdHelper";
-import { findBySteamId, createWithSteamAccount, ensureAdminFromEnv } from "../model/userModel";
+import {
+	findBySteamId,
+	createWithSteamAccount,
+	updateUsername,
+	ensureAdminFromEnv,
+} from "../model/userModel";
 import { grantAllCards } from "../model/collectionModel";
 import { recordLogin } from "../model/analyticsModel";
 import { encodeJWT } from "../helper/jwtHelper";
@@ -36,6 +41,20 @@ const loginWithSteamId = async (
 	Promise.resolve(ensureAdminFromEnv(user.id, steamId)).catch((error) =>
 		console.error("ensureAdminFromEnv failed", error),
 	);
+
+	// Pseudo réel affiché plutôt que le nom générique posé à la création
+	// (`Player123456`, voir createWithSteamAccount) : récupéré à chaque login
+	// pour rester à jour si le joueur change son pseudo Steam. Attendu (pas de
+	// fire-and-forget) pour que la réponse de ce login reflète déjà le bon nom ;
+	// n'échoue jamais le login si l'appel à Steam échoue (voir
+	// fetchSteamPersonaName, qui renvoie null plutôt que de lever).
+	const personaName = await fetchSteamPersonaName(steamId);
+	if (personaName && personaName !== user.username) {
+		await updateUsername(user.id, personaName).catch((error) =>
+			console.error("updateUsername failed", error),
+		);
+		user = { ...user, username: personaName };
+	}
 
 	const safeUser = { id: user.id, name: user.username };
 	const token = encodeJWT(safeUser);

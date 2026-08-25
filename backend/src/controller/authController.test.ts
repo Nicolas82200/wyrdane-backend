@@ -3,6 +3,7 @@ import type { Request, Response } from "express";
 
 vi.mock("../helper/steamHelper", () => ({
 	authenticateSteamTicket: vi.fn(),
+	fetchSteamPersonaName: vi.fn().mockResolvedValue(null),
 }));
 vi.mock("../helper/steamOpenIdHelper", () => ({
 	buildAuthUrl: vi.fn(() => "https://steamcommunity.com/openid/login?mock=1"),
@@ -11,6 +12,7 @@ vi.mock("../helper/steamOpenIdHelper", () => ({
 vi.mock("../model/userModel", () => ({
 	findBySteamId: vi.fn(),
 	createWithSteamAccount: vi.fn(),
+	updateUsername: vi.fn().mockResolvedValue(undefined),
 	ensureAdminFromEnv: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock("../model/collectionModel", () => ({
@@ -23,17 +25,19 @@ vi.mock("../helper/jwtHelper", () => ({
 	encodeJWT: vi.fn(() => "signed.jwt.token"),
 }));
 
-import { authenticateSteamTicket } from "../helper/steamHelper";
+import { authenticateSteamTicket, fetchSteamPersonaName } from "../helper/steamHelper";
 import { verifyAssertion } from "../helper/steamOpenIdHelper";
-import { findBySteamId, createWithSteamAccount } from "../model/userModel";
+import { findBySteamId, createWithSteamAccount, updateUsername } from "../model/userModel";
 import { grantAllCards } from "../model/collectionModel";
 import { steamLogin, steamOpenIdCallback, logout, authVerif } from "./authController";
 
 const mocked = {
 	authenticateSteamTicket: authenticateSteamTicket as ReturnType<typeof vi.fn>,
+	fetchSteamPersonaName: fetchSteamPersonaName as ReturnType<typeof vi.fn>,
 	verifyAssertion: verifyAssertion as ReturnType<typeof vi.fn>,
 	findBySteamId: findBySteamId as ReturnType<typeof vi.fn>,
 	createWithSteamAccount: createWithSteamAccount as ReturnType<typeof vi.fn>,
+	updateUsername: updateUsername as ReturnType<typeof vi.fn>,
 	grantAllCards: grantAllCards as ReturnType<typeof vi.fn>,
 };
 

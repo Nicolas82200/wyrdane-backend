@@ -77,6 +77,14 @@ const markStarterClaimed = async (userId: number, connection?: PoolConnection): 
 	await runner.query("UPDATE `users` SET starter_claimed_at = NOW() WHERE id = ?", [userId]);
 };
 
+// Rafraîchit le pseudo affiché avec le "persona name" Steam courant (appelé
+// à chaque login, voir authController.loginWithSteamId) : reste à jour si le
+// joueur change son pseudo Steam, sans jamais bloquer la connexion si l'appel
+// à l'API Web Steam échoue (voir fetchSteamPersonaName).
+const updateUsername = async (userId: number, username: string): Promise<void> => {
+	await db.query("UPDATE `users` SET username = ? WHERE id = ?", [username, userId]);
+};
+
 // Auto-répare le rôle admin à chaque connexion pour les steamid listés dans
 // ADMIN_STEAM_IDS (env, liste séparée par des virgules) : volontairement PAS
 // stocké uniquement en base, pour survivre à un reset de la BDD (fait pour
@@ -96,6 +104,7 @@ export {
 	findOne,
 	findBySteamId,
 	createWithSteamAccount,
+	updateUsername,
 	hasClaimedStarter,
 	markStarterClaimed,
 	ensureAdminFromEnv,
