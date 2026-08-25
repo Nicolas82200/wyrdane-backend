@@ -126,10 +126,15 @@ CREATE TABLE ranked_stats (
 -- Compteur de parties solo/vs IA (distinct de ranked_stats, pas de MMR ici) :
 -- alimenté par POST /api/rewards/solo-match, indépendamment du plafond
 -- quotidien de la récompense en monnaie (les stats comptent toujours).
+-- win_streak : victoires consécutives vs IA en cours, remise à 0 par
+-- n'importe quelle défaite (voir soloStatsModel.incrementResult) — sert de
+-- palier au bonus d'or de rewardsController.reportSoloMatch, distinct de
+-- `wins` qui ne fait qu'accumuler.
 CREATE TABLE solo_stats (
   user_id INT PRIMARY KEY,
   wins INT NOT NULL DEFAULT 0,
   losses INT NOT NULL DEFAULT 0,
+  win_streak INT NOT NULL DEFAULT 0,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
@@ -163,6 +168,11 @@ CREATE TABLE match_history (
 -- Un rapport par joueur et par match (client_match_id = identifiant généré
 -- côté client, partagé par les deux joueurs d'une même partie P2P). Le match
 -- n'est validé (cf match_history) que quand les deux rapports concordent.
+-- cards_played_by_race/deck_races : snapshot déclaratif par le reporter de sa
+-- propre partie (races des cartes jouées + races présentes dans son deck),
+-- utilisé uniquement pour faire progresser ses quêtes de race une fois le
+-- match confirmé (voir questModel.progressForMatch) — jamais pour l'autorité
+-- MMR/victoire, qui reste basée sur winner_id à double rapport.
 CREATE TABLE match_reports (
   id INT AUTO_INCREMENT PRIMARY KEY,
   client_match_id VARCHAR(100) NOT NULL,
@@ -170,6 +180,8 @@ CREATE TABLE match_reports (
   opponent_id INT NOT NULL,
   winner_id INT NOT NULL,
   season INT NOT NULL,
+  cards_played_by_race JSON NULL,
+  deck_races JSON NULL,
   reported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (reporter_id) REFERENCES users(id) ON DELETE CASCADE,
   FOREIGN KEY (opponent_id) REFERENCES users(id) ON DELETE CASCADE,

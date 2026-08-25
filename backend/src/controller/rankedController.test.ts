@@ -110,7 +110,7 @@ describe("reportMatch", () => {
 
 		await reportMatch(req, res);
 
-		expect(mocked.createReport).toHaveBeenCalledWith("m1", 1, 2, 1);
+		expect(mocked.createReport).toHaveBeenCalledWith("m1", 1, 2, 1, null, null);
 		expect(res.status).toHaveBeenCalledWith(202);
 		expect(mocked.confirmMatch).not.toHaveBeenCalled();
 	});
@@ -169,8 +169,43 @@ describe("reportMatch", () => {
 
 		await reportMatch(req, res);
 
-		expect(mocked.progressForMatch).toHaveBeenCalledWith(1, "ranked", true);
-		expect(mocked.progressForMatch).toHaveBeenCalledWith(2, "ranked", false);
+		expect(mocked.progressForMatch).toHaveBeenCalledWith(1, "ranked", true, {
+			cardsPlayedByRace: undefined,
+			deckRaces: undefined,
+		});
+		expect(mocked.progressForMatch).toHaveBeenCalledWith(2, "ranked", false, {
+			cardsPlayedByRace: undefined,
+			deckRaces: undefined,
+		});
+	});
+
+	it("progresses quests for both players using each player's own declared race data", async () => {
+		mocked.findMatchHistory.mockResolvedValue(null);
+		mocked.findReport.mockResolvedValueOnce(null).mockResolvedValueOnce({
+			opponent_id: 1,
+			winner_id: 1,
+			cards_played_by_race: { Demon: 3 },
+			deck_races: ["Demon"],
+		});
+		const req = reqAs(1, {
+			clientMatchId: "m1",
+			opponentId: 2,
+			winnerId: 1,
+			cardsPlayedByRace: { Undead: 4 },
+			deckRaces: ["Undead"],
+		});
+		const res = mockRes();
+
+		await reportMatch(req, res);
+
+		expect(mocked.progressForMatch).toHaveBeenCalledWith(1, "ranked", true, {
+			cardsPlayedByRace: { Undead: 4 },
+			deckRaces: ["Undead"],
+		});
+		expect(mocked.progressForMatch).toHaveBeenCalledWith(2, "ranked", false, {
+			cardsPlayedByRace: { Demon: 3 },
+			deckRaces: ["Demon"],
+		});
 	});
 
 	it("does not progress quests when the match is only pending (one report)", async () => {

@@ -127,6 +127,59 @@ describe("progressForMatch", () => {
 		expect(mockedDb.query).not.toHaveBeenCalledWith(expect.stringContaining("SET progress"), expect.anything());
 	});
 
+	it("increments a 'play_race' quest by the number of cards played of that race, regardless of the match outcome", async () => {
+		const raceTemplate = QUEST_TEMPLATES.find((t) => t.objective === "play_race" && t.race === "Demon")!;
+		queueEnsureTodayQuests([templateRow({ quest_code: raceTemplate.code, progress: 0, target: raceTemplate.target })]);
+		mockedDb.query.mockResolvedValueOnce([{}]); // UPDATE progress
+
+		await progressForMatch(1, "solo", false, { cardsPlayedByRace: { Demon: 4, Human: 2 } });
+
+		expect(mockedDb.query).toHaveBeenLastCalledWith(
+			expect.stringContaining("SET progress = LEAST"),
+			[4, 1],
+		);
+	});
+
+	it("does not increment a 'play_race' quest when no card of that race was played", async () => {
+		const raceTemplate = QUEST_TEMPLATES.find((t) => t.objective === "play_race" && t.race === "Demon")!;
+		queueEnsureTodayQuests([templateRow({ quest_code: raceTemplate.code, progress: 0, target: raceTemplate.target })]);
+
+		await progressForMatch(1, "solo", false, { cardsPlayedByRace: { Human: 2 } });
+
+		expect(mockedDb.query).not.toHaveBeenCalledWith(expect.stringContaining("SET progress"), expect.anything());
+	});
+
+	it("increments a 'win_race' quest on a win with a deck containing that race", async () => {
+		const raceTemplate = QUEST_TEMPLATES.find((t) => t.objective === "win_race" && t.race === "Undead")!;
+		queueEnsureTodayQuests([templateRow({ quest_code: raceTemplate.code, progress: 0, target: raceTemplate.target })]);
+		mockedDb.query.mockResolvedValueOnce([{}]); // UPDATE progress
+
+		await progressForMatch(1, "solo", true, { deckRaces: ["Undead", "Human"] });
+
+		expect(mockedDb.query).toHaveBeenLastCalledWith(
+			expect.stringContaining("SET progress = LEAST"),
+			[1],
+		);
+	});
+
+	it("does not increment a 'win_race' quest on a loss, even with a matching deck", async () => {
+		const raceTemplate = QUEST_TEMPLATES.find((t) => t.objective === "win_race" && t.race === "Undead")!;
+		queueEnsureTodayQuests([templateRow({ quest_code: raceTemplate.code, progress: 0, target: raceTemplate.target })]);
+
+		await progressForMatch(1, "solo", false, { deckRaces: ["Undead"] });
+
+		expect(mockedDb.query).not.toHaveBeenCalledWith(expect.stringContaining("SET progress"), expect.anything());
+	});
+
+	it("does not increment a 'win_race' quest when the deck doesn't contain that race", async () => {
+		const raceTemplate = QUEST_TEMPLATES.find((t) => t.objective === "win_race" && t.race === "Undead")!;
+		queueEnsureTodayQuests([templateRow({ quest_code: raceTemplate.code, progress: 0, target: raceTemplate.target })]);
+
+		await progressForMatch(1, "solo", true, { deckRaces: ["Demon"] });
+
+		expect(mockedDb.query).not.toHaveBeenCalledWith(expect.stringContaining("SET progress"), expect.anything());
+	});
+
 	it("skips quests that are already at their target or already claimed", async () => {
 		const playTemplate = QUEST_TEMPLATES.find((t) => t.objective === "play")!;
 		queueEnsureTodayQuests([
