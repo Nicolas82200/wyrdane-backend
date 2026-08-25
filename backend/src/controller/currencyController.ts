@@ -43,8 +43,8 @@ const claimFirstLoginRewardHandler = async (req: Request, res: Response): Promis
 			return;
 		}
 
-		const { credited, balance } = await claimFirstLoginReward(userId);
-		res.status(200).json({ credited, balance });
+		const { credited, balance, amount } = await claimFirstLoginReward(userId);
+		res.status(200).json({ credited, balance, amount });
 	} catch (error) {
 		console.error(error);
 		res.status(500).json({ message: "Server error" });

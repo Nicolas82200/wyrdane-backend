@@ -136,9 +136,11 @@ const markFirstLoginRewardClaimed = async (userId: number, connection?: PoolConn
 	await runner.query("UPDATE users SET first_login_reward_claimed_at = NOW() WHERE id = ?", [userId]);
 };
 
-const claimFirstLoginReward = async (userId: number): Promise<{ credited: boolean; balance: number }> => {
+const claimFirstLoginReward = async (
+	userId: number,
+): Promise<{ credited: boolean; balance: number; amount: number }> => {
 	if (await hasClaimedFirstLoginReward(userId)) {
-		return { credited: false, balance: await getBalance(userId) };
+		return { credited: false, balance: await getBalance(userId), amount: FIRST_LOGIN_REWARD };
 	}
 
 	const connection = await db.getConnection();
@@ -154,7 +156,7 @@ const claimFirstLoginReward = async (userId: number): Promise<{ credited: boolea
 		connection.release();
 	}
 
-	return { credited: true, balance: await getBalance(userId) };
+	return { credited: true, balance: await getBalance(userId), amount: FIRST_LOGIN_REWARD };
 };
 
 export {
