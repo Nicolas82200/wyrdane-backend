@@ -50,6 +50,7 @@ services:
       STEAM_APP_ID: ${STEAM_APP_ID}
       DEV_GRANT_ALL_CARDS: "false"
       DEV_SKIP_STEAM_VERIFY: "false"
+      ADMIN_STEAM_IDS: ${ADMIN_STEAM_IDS}
       SMTP_HOST: ${SMTP_HOST}
       SMTP_PORT: ${SMTP_PORT}
       SMTP_SECURE: ${SMTP_SECURE}
