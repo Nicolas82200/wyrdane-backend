@@ -107,12 +107,23 @@ function sqlNum(v) {
 const files = walk(CARDS_DIR);
 const rows = [];
 let tokenCount = 0;
+let arenaCount = 0;
 
 for (const file of files) {
   const text = readFileSync(file, "utf8");
   const isToken = /is_token\s*=\s*true/.test(text);
   if (isToken) {
     tokenCount++;
+    continue;
+  }
+  // CardData.arena_only (scripts/card/CardData.gd) : jamais proposée au
+  // deckbuilder 1v1 ni au pool de packs côté jeu (CardLibrary.arena_only_cards,
+  // séparé de all_cards) - ce script les incluait par erreur, laissant des
+  // cartes Arena apparaître dans le catalogue du site comme des cartes
+  // normales.
+  const isArenaOnly = /arena_only\s*=\s*true/.test(text);
+  if (isArenaOnly) {
+    arenaCount++;
     continue;
   }
   const resIdx = text.indexOf("[resource]");
@@ -175,7 +186,7 @@ for (const file of files) {
   });
 }
 
-console.log("Parsed cards:", rows.length, "tokens skipped:", tokenCount);
+console.log("Parsed cards:", rows.length, "tokens skipped:", tokenCount, "arena-only skipped:", arenaCount);
 
 const seen = new Map();
 for (const r of rows) {
