@@ -41,6 +41,26 @@ const ensureUsersColumns = async (connection: mysql.Connection): Promise<void> =
 	}
 };
 
+// win_streak ajoutée à solo_stats après sa création initiale (voir
+// schema.sql) — même pattern que ensureUsersColumns, sur une table distincte.
+const SOLO_STATS_COLUMNS_TO_ENSURE: { name: string; ddl: string }[] = [
+	{ name: "win_streak", ddl: "win_streak INT NOT NULL DEFAULT 0" },
+];
+
+const ensureSoloStatsColumns = async (connection: mysql.Connection): Promise<void> => {
+	const [rows] = await connection.query<mysql.RowDataPacket[]>(
+		"SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'solo_stats'",
+		[DB_NAME],
+	);
+	const existing = new Set(rows.map((row) => row.COLUMN_NAME as string));
+
+	for (const column of SOLO_STATS_COLUMNS_TO_ENSURE) {
+		if (existing.has(column.name)) continue;
+		console.log(`→ Ajout de la colonne solo_stats.${column.name}...`);
+		await connection.query(`ALTER TABLE solo_stats ADD COLUMN ${column.ddl}`);
+	}
+};
+
 // username n'a plus vocation à être unique (voir schema.sql) : c'est
 // désormais le pseudo Steam affiché, que plusieurs joueurs peuvent partager.
 // Un index inline UNIQUE ancien est nommé comme la colonne par défaut en
@@ -55,6 +75,27 @@ const dropUsernameUniqueIndex = async (connection: mysql.Connection): Promise<vo
 	if (rows.length === 0) return;
 	console.log("→ Suppression de la contrainte UNIQUE sur users.username...");
 	await connection.query("ALTER TABLE users DROP INDEX username");
+};
+
+// cards_played_by_race/deck_races ajoutées à match_reports après sa création
+// initiale (voir schema.sql) — même pattern que ensureSoloStatsColumns.
+const MATCH_REPORTS_COLUMNS_TO_ENSURE: { name: string; ddl: string }[] = [
+	{ name: "cards_played_by_race", ddl: "cards_played_by_race JSON NULL" },
+	{ name: "deck_races", ddl: "deck_races JSON NULL" },
+];
+
+const ensureMatchReportsColumns = async (connection: mysql.Connection): Promise<void> => {
+	const [rows] = await connection.query<mysql.RowDataPacket[]>(
+		"SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'match_reports'",
+		[DB_NAME],
+	);
+	const existing = new Set(rows.map((row) => row.COLUMN_NAME as string));
+
+	for (const column of MATCH_REPORTS_COLUMNS_TO_ENSURE) {
+		if (existing.has(column.name)) continue;
+		console.log(`→ Ajout de la colonne match_reports.${column.name}...`);
+		await connection.query(`ALTER TABLE match_reports ADD COLUMN ${column.ddl}`);
+	}
 };
 
 const main = async (): Promise<void> => {
@@ -75,6 +116,10 @@ const main = async (): Promise<void> => {
 		await dropUsernameUniqueIndex(connection);
 		const sql = readFileSync(SCHEMA_SYNC_PATH, "utf8");
 		await connection.query(sql);
+		// Après le CREATE TABLE IF NOT EXISTS ci-dessus : solo_stats/match_reports
+		// sont garanties d'exister avant qu'on tente d'y ajouter une colonne.
+		await ensureSoloStatsColumns(connection);
+		await ensureMatchReportsColumns(connection);
 		console.log("✓ Schéma à jour, aucune donnée existante affectée.");
 	} finally {
 		await connection.end();

@@ -8,11 +8,38 @@ import { credit, getBalance } from "./currencyModel";
 // l'assignation/progression par joueur, pas la définition de la quête.
 interface QuestTemplate {
 	code: string;
-	objective: "play" | "win" | "win_ranked";
+	objective: "play" | "win" | "win_ranked" | "play_race" | "win_race";
 	target: number;
 	rewardCurrency: number;
 	descriptionKey: string;
+	// Uniquement pour play_race/win_race : nom de race tel qu'utilisé côté
+	// client (Race.get_race_name — "Human"/"Undead"/"Demon"/"Abomination").
+	race?: string;
 }
+
+// Races jouables (voir Race.get_implemented_races côté client) pour lesquelles
+// une paire de quêtes play_race/win_race est générée ci-dessous.
+const IMPLEMENTED_RACES = ["Human", "Undead", "Demon", "Abomination"] as const;
+
+const raceQuestTemplates = (): QuestTemplate[] =>
+	IMPLEMENTED_RACES.flatMap((race) => [
+		{
+			code: `play_race_${race.toLowerCase()}_10`,
+			objective: "play_race" as const,
+			race,
+			target: 10,
+			rewardCurrency: 40,
+			descriptionKey: `QUEST_PLAY_RACE_${race.toUpperCase()}_10`,
+		},
+		{
+			code: `win_race_${race.toLowerCase()}_2`,
+			objective: "win_race" as const,
+			race,
+			target: 2,
+			rewardCurrency: 60,
+			descriptionKey: `QUEST_WIN_RACE_${race.toUpperCase()}_2`,
+		},
+	]);
 
 const QUEST_TEMPLATES: QuestTemplate[] = [
 	{ code: "play_3", objective: "play", target: 3, rewardCurrency: 30, descriptionKey: "QUEST_PLAY_3" },
@@ -20,6 +47,7 @@ const QUEST_TEMPLATES: QuestTemplate[] = [
 	{ code: "win_2", objective: "win", target: 2, rewardCurrency: 50, descriptionKey: "QUEST_WIN_2" },
 	{ code: "win_3", objective: "win", target: 3, rewardCurrency: 70, descriptionKey: "QUEST_WIN_3" },
 	{ code: "win_ranked_1", objective: "win_ranked", target: 1, rewardCurrency: 80, descriptionKey: "QUEST_WIN_RANKED_1" },
+	...raceQuestTemplates(),
 ];
 
 const QUESTS_PER_DAY = 3;
@@ -127,25 +155,45 @@ const getDailyQuests = async (userId: number): Promise<DailyQuestsResponse> => {
 	};
 };
 
+interface MatchRaceData {
+	// Nombre de cartes jouées pendant le match, par race — alimente les
+	// quêtes play_race quel que soit le résultat du match.
+	cardsPlayedByRace?: Record<string, number>;
+	// Races présentes dans le deck utilisé pour ce match — alimente les
+	// quêtes win_race, uniquement sur une victoire.
+	deckRaces?: string[];
+}
+
 // Fait progresser les quêtes actives concernées par ce résultat de match
-// (play_* toujours, win_*/win_ranked_* seulement en cas de victoire) —
-// appelé une fois par joueur et par match confirmé, depuis rewardsController
-// (solo) et rankedController (classé, pour les deux joueurs). Ignore les
+// (play_*/play_race_* toujours, win_*/win_ranked_*/win_race_* seulement en
+// cas de victoire) — appelé une fois par joueur et par match confirmé,
+// depuis rewardsController (solo) et rankedController (classé, pour les deux
+// joueurs, avec les données de race déclarées par chacun). Ignore les
 // quêtes déjà au maximum ou déjà réclamées.
-const progressForMatch = async (userId: number, mode: "solo" | "ranked", won: boolean): Promise<void> => {
+const progressForMatch = async (
+	userId: number,
+	mode: "solo" | "ranked",
+	won: boolean,
+	raceData: MatchRaceData = {},
+): Promise<void> => {
 	const quests = await ensureTodayQuests(userId);
 	for (const quest of quests) {
 		if (quest.claimed_at !== null || quest.progress >= quest.target) continue;
 		const template = templateByCode(quest.quest_code);
 		if (!template) continue;
 
-		const matches =
-			template.objective === "play" ||
-			(template.objective === "win" && won) ||
-			(template.objective === "win_ranked" && won && mode === "ranked");
-		if (!matches) continue;
-
-		await db.query("UPDATE daily_quests SET progress = LEAST(progress + 1, target) WHERE id = ?", [quest.id]);
+		if (template.objective === "play" || (template.objective === "win" && won)) {
+			await db.query("UPDATE daily_quests SET progress = LEAST(progress + 1, target) WHERE id = ?", [quest.id]);
+		} else if (template.objective === "win_ranked" && won && mode === "ranked") {
+			await db.query("UPDATE daily_quests SET progress = LEAST(progress + 1, target) WHERE id = ?", [quest.id]);
+		} else if (template.objective === "play_race" && template.race) {
+			const count = raceData.cardsPlayedByRace?.[template.race] ?? 0;
+			if (count <= 0) continue;
+			await db.query("UPDATE daily_quests SET progress = LEAST(progress + ?, target) WHERE id = ?", [count, quest.id]);
+		} else if (template.objective === "win_race" && template.race && won) {
+			if (!raceData.deckRaces?.includes(template.race)) continue;
+			await db.query("UPDATE daily_quests SET progress = LEAST(progress + 1, target) WHERE id = ?", [quest.id]);
+		}
 	}
 };
 

@@ -79,6 +79,7 @@ CREATE TABLE IF NOT EXISTS solo_stats (
   user_id INT PRIMARY KEY,
   wins INT NOT NULL DEFAULT 0,
   losses INT NOT NULL DEFAULT 0,
+  win_streak INT NOT NULL DEFAULT 0,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
@@ -109,6 +110,8 @@ CREATE TABLE IF NOT EXISTS match_reports (
   opponent_id INT NOT NULL,
   winner_id INT NOT NULL,
   season INT NOT NULL,
+  cards_played_by_race JSON NULL,
+  deck_races JSON NULL,
   reported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (reporter_id) REFERENCES users(id) ON DELETE CASCADE,
   FOREIGN KEY (opponent_id) REFERENCES users(id) ON DELETE CASCADE,

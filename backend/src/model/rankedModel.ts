@@ -22,6 +22,8 @@ interface MatchReportRow extends RowDataPacket {
 	opponent_id: number;
 	winner_id: number;
 	season: number;
+	cards_played_by_race: Record<string, number> | null;
+	deck_races: string[] | null;
 }
 
 interface MatchHistoryRow extends RowDataPacket {
@@ -72,10 +74,22 @@ const createReport = async (
 	reporterId: number,
 	opponentId: number,
 	winnerId: number,
+	cardsPlayedByRace: Record<string, number> | null = null,
+	deckRaces: string[] | null = null,
 ): Promise<void> => {
 	await db.query(
-		"INSERT INTO match_reports (client_match_id, reporter_id, opponent_id, winner_id, season) VALUES (?, ?, ?, ?, ?)",
-		[clientMatchId, reporterId, opponentId, winnerId, CURRENT_SEASON],
+		`INSERT INTO match_reports
+		 (client_match_id, reporter_id, opponent_id, winner_id, season, cards_played_by_race, deck_races)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		[
+			clientMatchId,
+			reporterId,
+			opponentId,
+			winnerId,
+			CURRENT_SEASON,
+			cardsPlayedByRace ? JSON.stringify(cardsPlayedByRace) : null,
+			deckRaces ? JSON.stringify(deckRaces) : null,
+		],
 	);
 };
 

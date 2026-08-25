@@ -4,7 +4,6 @@ import type { Request, Response } from "express";
 vi.mock("../model/currencyModel", () => ({
 	credit: vi.fn(),
 	getBalance: vi.fn(),
-	countReasonToday: vi.fn(),
 }));
 vi.mock("../model/soloStatsModel", () => ({
 	incrementResult: vi.fn(),
@@ -13,7 +12,7 @@ vi.mock("../model/questModel", () => ({
 	progressForMatch: vi.fn(),
 }));
 
-import { credit, getBalance, countReasonToday } from "../model/currencyModel";
+import { credit, getBalance } from "../model/currencyModel";
 import { incrementResult } from "../model/soloStatsModel";
 import { progressForMatch } from "../model/questModel";
 import { reportSoloMatch } from "./rewardsController";
@@ -21,7 +20,6 @@ import { reportSoloMatch } from "./rewardsController";
 const mocked = {
 	credit: credit as ReturnType<typeof vi.fn>,
 	getBalance: getBalance as ReturnType<typeof vi.fn>,
-	countReasonToday: countReasonToday as ReturnType<typeof vi.fn>,
 	incrementResult: incrementResult as ReturnType<typeof vi.fn>,
 	progressForMatch: progressForMatch as ReturnType<typeof vi.fn>,
 };
@@ -57,64 +55,64 @@ describe("reportSoloMatch", () => {
 		expect(mocked.credit).not.toHaveBeenCalled();
 	});
 
-	it("always records the stat, even when the daily cap is reached", async () => {
-		mocked.countReasonToday.mockResolvedValue(5);
-		const req = reqAs(1, { result: "victory" });
-		const res = mockRes();
-
-		await reportSoloMatch(req, res);
-
-		expect(mocked.incrementResult).toHaveBeenCalledWith(1, true);
-	});
-
-	it("progresses quests independently of the currency daily cap", async () => {
-		mocked.countReasonToday.mockResolvedValue(5);
+	it("records the stat and progresses quests for a defeat", async () => {
+		mocked.incrementResult.mockResolvedValue(0);
 		const req = reqAs(1, { result: "defeat" });
 		const res = mockRes();
 
 		await reportSoloMatch(req, res);
 
-		expect(mocked.progressForMatch).toHaveBeenCalledWith(1, "solo", false);
+		expect(mocked.incrementResult).toHaveBeenCalledWith(1, false);
+		expect(mocked.progressForMatch).toHaveBeenCalledWith(1, "solo", false, {
+			cardsPlayedByRace: undefined,
+			deckRaces: undefined,
+		});
 	});
 
-	it("does not credit currency once the daily win cap is reached", async () => {
-		mocked.countReasonToday.mockResolvedValue(5);
-		const req = reqAs(1, { result: "victory" });
-		const res = mockRes();
-
-		await reportSoloMatch(req, res);
-
-		expect(mocked.credit).not.toHaveBeenCalled();
-		expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ credited: false }));
-	});
-
-	it("credits the win reward while under the daily cap", async () => {
-		mocked.countReasonToday.mockResolvedValue(2);
-		const req = reqAs(1, { result: "victory" });
-		const res = mockRes();
-
-		await reportSoloMatch(req, res);
-
-		expect(mocked.credit).toHaveBeenCalledWith(1, 25, "match_win_solo");
-		expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ credited: true }));
-	});
-
-	it("credits a smaller reward for a defeat, tracked under a separate daily cap", async () => {
-		mocked.countReasonToday.mockResolvedValue(0);
+	it("credits a flat reward for a defeat, with no daily cap", async () => {
+		mocked.incrementResult.mockResolvedValue(0);
 		const req = reqAs(1, { result: "defeat" });
 		const res = mockRes();
 
 		await reportSoloMatch(req, res);
 
-		expect(mocked.countReasonToday).toHaveBeenCalledWith(1, "match_loss_solo");
-		expect(mocked.credit).toHaveBeenCalledWith(1, 10, "match_loss_solo");
+		expect(mocked.credit).toHaveBeenCalledWith(1, 5, "match_loss_solo");
+		expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ credited: true, reward: 5 }));
 	});
 
-	it("keeps win and defeat daily caps independent of each other", async () => {
-		// 5 defeats already logged today must not block a victory reward
-		mocked.countReasonToday.mockImplementation((_userId: number, reason: string) =>
-			Promise.resolve(reason === "match_loss_solo" ? 5 : 0),
-		);
+	it("credits the base win reward below a 3-win streak", async () => {
+		mocked.incrementResult.mockResolvedValue(2);
+		const req = reqAs(1, { result: "victory" });
+		const res = mockRes();
+
+		await reportSoloMatch(req, res);
+
+		expect(mocked.credit).toHaveBeenCalledWith(1, 10, "match_win_solo");
+		expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ credited: true, reward: 10, winStreak: 2 }));
+	});
+
+	it("credits 15 gold at a 3-win streak", async () => {
+		mocked.incrementResult.mockResolvedValue(3);
+		const req = reqAs(1, { result: "victory" });
+		const res = mockRes();
+
+		await reportSoloMatch(req, res);
+
+		expect(mocked.credit).toHaveBeenCalledWith(1, 15, "match_win_solo");
+	});
+
+	it("credits 20 gold at a 5-win streak", async () => {
+		mocked.incrementResult.mockResolvedValue(5);
+		const req = reqAs(1, { result: "victory" });
+		const res = mockRes();
+
+		await reportSoloMatch(req, res);
+
+		expect(mocked.credit).toHaveBeenCalledWith(1, 20, "match_win_solo");
+	});
+
+	it("credits 25 gold at a 7-win streak and beyond", async () => {
+		mocked.incrementResult.mockResolvedValue(9);
 		const req = reqAs(1, { result: "victory" });
 		const res = mockRes();
 

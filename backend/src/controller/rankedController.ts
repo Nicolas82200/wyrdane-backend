@@ -19,10 +19,12 @@ const reportMatch = async (req: Request, res: Response): Promise<void> => {
 			return;
 		}
 
-		const { clientMatchId, opponentId, winnerId } = req.body as {
+		const { clientMatchId, opponentId, winnerId, cardsPlayedByRace, deckRaces } = req.body as {
 			clientMatchId?: string;
 			opponentId?: number;
 			winnerId?: number;
+			cardsPlayedByRace?: Record<string, number>;
+			deckRaces?: string[];
 		};
 
 		if (
@@ -47,7 +49,7 @@ const reportMatch = async (req: Request, res: Response): Promise<void> => {
 			return;
 		}
 
-		await createReport(clientMatchId, userId, opponentId, winnerId);
+		await createReport(clientMatchId, userId, opponentId, winnerId, cardsPlayedByRace ?? null, deckRaces ?? null);
 
 		const opponentReport = await findReport(clientMatchId, opponentId);
 		if (!opponentReport) {
@@ -66,8 +68,14 @@ const reportMatch = async (req: Request, res: Response): Promise<void> => {
 		await confirmMatch(clientMatchId, userId, opponentId, winnerId);
 		// Une fois par joueur, jamais deux fois (confirmMatch ne s'exécute qu'une
 		// seule fois par match — voir le court-circuit findMatchHistory plus haut).
-		await progressForMatch(userId, "ranked", winnerId === userId);
-		await progressForMatch(opponentId, "ranked", winnerId === opponentId);
+		// Chaque joueur ne fait progresser ses quêtes de race qu'avec les données
+		// qu'il a lui-même déclarées dans son propre rapport (jamais celles de
+		// l'adversaire, qui ne connaît pas son deck).
+		await progressForMatch(userId, "ranked", winnerId === userId, { cardsPlayedByRace, deckRaces });
+		await progressForMatch(opponentId, "ranked", winnerId === opponentId, {
+			cardsPlayedByRace: opponentReport.cards_played_by_race ?? undefined,
+			deckRaces: opponentReport.deck_races ?? undefined,
+		});
 		res.status(200).json({ status: "confirmed" });
 	} catch (error) {
 		console.error(error);
