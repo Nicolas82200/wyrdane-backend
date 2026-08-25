@@ -171,7 +171,7 @@ describe("claimFirstLoginReward", () => {
 
 		const result = await claimFirstLoginReward(1);
 
-		expect(result).toEqual({ credited: false, balance: 1500 });
+		expect(result).toEqual({ credited: false, balance: 1500, amount: FIRST_LOGIN_REWARD });
 		expect(mockedDb.getConnection).not.toHaveBeenCalled();
 	});
 
@@ -201,7 +201,7 @@ describe("claimFirstLoginReward", () => {
 		expect(connection.commit).toHaveBeenCalledTimes(1);
 		expect(connection.rollback).not.toHaveBeenCalled();
 		expect(connection.release).toHaveBeenCalledTimes(1);
-		expect(result).toEqual({ credited: true, balance: FIRST_LOGIN_REWARD });
+		expect(result).toEqual({ credited: true, balance: FIRST_LOGIN_REWARD, amount: FIRST_LOGIN_REWARD });
 	});
 
 	it("rolls back and rethrows if crediting fails mid-transaction", async () => {
