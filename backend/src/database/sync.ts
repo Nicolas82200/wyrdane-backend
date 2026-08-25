@@ -41,6 +41,22 @@ const ensureUsersColumns = async (connection: mysql.Connection): Promise<void> =
 	}
 };
 
+// username n'a plus vocation à être unique (voir schema.sql) : c'est
+// désormais le pseudo Steam affiché, que plusieurs joueurs peuvent partager.
+// Un index inline UNIQUE ancien est nommé comme la colonne par défaut en
+// MySQL/MariaDB ("username") : vérifié via information_schema avant de le
+// supprimer pour rester rejouable sans erreur sur une base déjà à jour.
+const dropUsernameUniqueIndex = async (connection: mysql.Connection): Promise<void> => {
+	const [rows] = await connection.query<mysql.RowDataPacket[]>(
+		`SELECT INDEX_NAME FROM information_schema.STATISTICS
+		 WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'users' AND INDEX_NAME = 'username'`,
+		[DB_NAME],
+	);
+	if (rows.length === 0) return;
+	console.log("→ Suppression de la contrainte UNIQUE sur users.username...");
+	await connection.query("ALTER TABLE users DROP INDEX username");
+};
+
 const main = async (): Promise<void> => {
 	const connection = await mysql.createConnection({
 		host: DB_HOST,
@@ -56,6 +72,7 @@ const main = async (): Promise<void> => {
 	try {
 		console.log("→ Synchronisation additive du schéma...");
 		await ensureUsersColumns(connection);
+		await dropUsernameUniqueIndex(connection);
 		const sql = readFileSync(SCHEMA_SYNC_PATH, "utf8");
 		await connection.query(sql);
 		console.log("✓ Schéma à jour, aucune donnée existante affectée.");

@@ -71,4 +71,31 @@ const authenticateSteamTicket = async (ticket: string): Promise<string | null> =
   return params.steamid;
 };
 
-export { authenticateSteamTicket };
+interface GetPlayerSummariesResponse {
+  response?: {
+    players?: { steamid: string; personaname: string }[];
+  };
+}
+
+// Pseudo Steam affiché ("persona name"), récupéré via l'API Web publique —
+// même clé personnelle que authenticateSteamTicket, pas besoin d'accès
+// Steamworks Partner pour cet endpoint. Renvoie null (plutôt que de lever)
+// en cas d'échec réseau/clé manquante : appelé à chaque login, ne doit
+// jamais faire échouer la connexion elle-même.
+const fetchSteamPersonaName = async (steamId: string): Promise<string | null> => {
+  try {
+    const { STEAM_WEB_API_KEY } = process.env;
+    const url = new URL("https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v2/");
+    url.searchParams.set("key", STEAM_WEB_API_KEY as string);
+    url.searchParams.set("steamids", steamId);
+
+    const res = await fetch(url);
+    const data = (await res.json()) as GetPlayerSummariesResponse;
+    return data.response?.players?.[0]?.personaname ?? null;
+  } catch (error) {
+    console.error("fetchSteamPersonaName failed", error);
+    return null;
+  }
+};
+
+export { authenticateSteamTicket, fetchSteamPersonaName };
