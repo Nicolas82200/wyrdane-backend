@@ -25,6 +25,7 @@ const USERS_COLUMNS_TO_ENSURE: { name: string; ddl: string }[] = [
 	{ name: "starter_currency_claimed_at", ddl: "starter_currency_claimed_at TIMESTAMP NULL DEFAULT NULL" },
 	{ name: "first_login_reward_claimed_at", ddl: "first_login_reward_claimed_at TIMESTAMP NULL DEFAULT NULL" },
 	{ name: "is_admin", ddl: "is_admin BOOLEAN NOT NULL DEFAULT FALSE" },
+	{ name: "free_packs", ddl: "free_packs INT NOT NULL DEFAULT 0" },
 ];
 
 const ensureUsersColumns = async (connection: mysql.Connection): Promise<void> => {

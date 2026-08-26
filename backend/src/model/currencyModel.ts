@@ -9,6 +9,13 @@ class InsufficientFundsError extends Error {
 	}
 }
 
+class InsufficientFreePacksError extends Error {
+	constructor() {
+		super("Aucun pack gratuit disponible");
+		this.name = "InsufficientFreePacksError";
+	}
+}
+
 // Accordé explicitement à la création du compte (voir
 // userModel.createWithSteamAccount) ; les comptes créés avant l'ajout de ce
 // bonus le reçoivent séparément via claimStarterBonus, plus bas.
@@ -69,6 +76,37 @@ const debit = async (
 		"INSERT INTO currency_ledger (user_id, amount, reason, reference) VALUES (?, ?, ?, ?)",
 		[userId, -amount, reason, reference ?? null],
 	);
+};
+
+// Solde de packs gratuits (quêtes hebdomadaires, parrainage — voir
+// weeklyQuestModel/referralModel), distinct de soft_currency. Pas de ledger
+// dédié comme currency_ledger : une seule source de valeur pour l'instant,
+// pas besoin d'audit fin.
+const getFreePacks = async (userId: number): Promise<number> => {
+	const [rows] = await db.query<(RowDataPacket & { free_packs: number })[]>(
+		"SELECT free_packs FROM users WHERE id = ?",
+		[userId],
+	);
+	return rows[0]?.free_packs ?? 0;
+};
+
+const creditFreePacks = async (userId: number, amount: number, connection?: PoolConnection): Promise<void> => {
+	const runner: Pool | PoolConnection = connection ?? db;
+	await runner.query("UPDATE users SET free_packs = free_packs + ? WHERE id = ?", [amount, userId]);
+};
+
+// Débite un seul pack gratuit (verrouille la ligne si appelé dans une
+// transaction fournie, même garde-fou anti-double-clic que debit()).
+const debitFreePack = async (userId: number, connection?: PoolConnection): Promise<void> => {
+	const runner: Pool | PoolConnection = connection ?? db;
+	const [rows] = await runner.query<(RowDataPacket & { free_packs: number })[]>(
+		connection ? "SELECT free_packs FROM users WHERE id = ? FOR UPDATE" : "SELECT free_packs FROM users WHERE id = ?",
+		[userId],
+	);
+	const freePacks = rows[0]?.free_packs ?? 0;
+	if (freePacks < 1) throw new InsufficientFreePacksError();
+
+	await runner.query("UPDATE users SET free_packs = free_packs - 1 WHERE id = ?", [userId]);
 };
 
 // Montant total crédité/débité à un joueur pour une référence donnée (ex. un
@@ -175,11 +213,15 @@ const claimFirstLoginReward = async (
 
 export {
 	InsufficientFundsError,
+	InsufficientFreePacksError,
 	STARTER_CURRENCY,
 	FIRST_LOGIN_REWARD,
 	getBalance,
 	credit,
 	debit,
+	getFreePacks,
+	creditFreePacks,
+	debitFreePack,
 	getCreditedAmountForReference,
 	countReasonToday,
 	claimStarterBonus,

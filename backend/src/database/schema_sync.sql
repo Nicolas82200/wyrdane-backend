@@ -135,6 +135,34 @@ CREATE TABLE IF NOT EXISTS daily_quests (
   UNIQUE KEY unique_user_quest_date_slot (user_id, quest_date, slot)
 );
 
+CREATE TABLE IF NOT EXISTS weekly_quests (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  user_id INT NOT NULL,
+  week_start DATE NOT NULL,
+  slot TINYINT NOT NULL,
+  quest_code VARCHAR(30) NOT NULL,
+  progress INT NOT NULL DEFAULT 0,
+  target INT NOT NULL,
+  reward_pack INT NOT NULL,
+  claimed_at TIMESTAMP NULL DEFAULT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  UNIQUE KEY unique_user_quest_week_slot (user_id, week_start, slot)
+);
+
+CREATE TABLE IF NOT EXISTS referrals (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  referrer_id INT NOT NULL UNIQUE,
+  code VARCHAR(12) NOT NULL UNIQUE,
+  referred_id INT NULL UNIQUE,
+  redeemed_at TIMESTAMP NULL DEFAULT NULL,
+  completed_at TIMESTAMP NULL DEFAULT NULL,
+  reward_granted_at TIMESTAMP NULL DEFAULT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (referrer_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (referred_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS cosmetic_items (
   id INT AUTO_INCREMENT PRIMARY KEY,
   steam_item_id VARCHAR(50) NOT NULL UNIQUE,

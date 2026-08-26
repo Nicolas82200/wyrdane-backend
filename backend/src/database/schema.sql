@@ -6,6 +6,8 @@ DROP TABLE IF EXISTS deck_cards;
 DROP TABLE IF EXISTS decks;
 DROP TABLE IF EXISTS user_cards;
 DROP TABLE IF EXISTS daily_quests;
+DROP TABLE IF EXISTS weekly_quests;
+DROP TABLE IF EXISTS referrals;
 DROP TABLE IF EXISTS login_rewards;
 DROP TABLE IF EXISTS match_reports;
 DROP TABLE IF EXISTS match_history;
@@ -49,7 +51,13 @@ CREATE TABLE users (
   -- volontairement absent du payload JWT (voir jwtHelper) et revérifié en base
   -- à chaque requête admin, car le JWT reste valide jusqu'à 1h après un retrait
   -- de droits.
-  is_admin BOOLEAN NOT NULL DEFAULT FALSE
+  is_admin BOOLEAN NOT NULL DEFAULT FALSE,
+  -- Solde de packs gratuits à ouvrir (distinct de soft_currency) : alimenté
+  -- par les quêtes hebdomadaires et le parrainage (voir weeklyQuestModel/
+  -- referralModel), consommé par POST /api/packs/open-owned. Pas de ledger
+  -- dédié (contrairement à currency_ledger) : une seule source de valeur, pas
+  -- besoin d'audit fin pour l'instant.
+  free_packs INT NOT NULL DEFAULT 0
 );
 
 -- Une ligne par identité liée (Steam aujourd'hui, potentiellement email/Google/Apple
@@ -211,6 +219,48 @@ CREATE TABLE daily_quests (
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
   UNIQUE KEY unique_user_quest_date_slot (user_id, quest_date, slot)
+);
+
+-- Assignation/progression des 3 quêtes hebdomadaires d'un joueur, même
+-- principe que daily_quests (contenu en code, WEEKLY_QUEST_TEMPLATES) mais
+-- reset chaque lundi et récompense en packs (reward_pack) plutôt qu'en or.
+-- week_start = lundi de la semaine courante (calculé côté SQL via WEEKDAY(),
+-- jamais côté JS, pour rester cohérent quel que soit le fuseau du serveur).
+CREATE TABLE weekly_quests (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  user_id INT NOT NULL,
+  week_start DATE NOT NULL,
+  slot TINYINT NOT NULL,
+  quest_code VARCHAR(30) NOT NULL,
+  progress INT NOT NULL DEFAULT 0,
+  target INT NOT NULL,
+  reward_pack INT NOT NULL,
+  claimed_at TIMESTAMP NULL DEFAULT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  UNIQUE KEY unique_user_quest_week_slot (user_id, week_start, slot)
+);
+
+-- Parrainage à sens unique : un joueur ne peut parrainer qu'UN SEUL ami
+-- (referrer_id UNIQUE, contrainte anti-abus posée en base plutôt qu'en
+-- logique applicative) ; un compte ne peut être parrainé qu'une seule fois,
+-- par n'importe qui (referred_id UNIQUE, NULL autorisé tant que le code n'a
+-- pas été utilisé — MySQL n'applique pas UNIQUE entre plusieurs NULL).
+-- redeemed_at : le filleul a entré le code. completed_at : le filleul a
+-- terminé le tutoriel (voir users.starter_claimed_at). reward_granted_at :
+-- le parrain a été crédité (3 packs + 500 or) — idempotence, jamais crédité
+-- deux fois même si claim-starter est rappelé.
+CREATE TABLE referrals (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  referrer_id INT NOT NULL UNIQUE,
+  code VARCHAR(12) NOT NULL UNIQUE,
+  referred_id INT NULL UNIQUE,
+  redeemed_at TIMESTAMP NULL DEFAULT NULL,
+  completed_at TIMESTAMP NULL DEFAULT NULL,
+  reward_granted_at TIMESTAMP NULL DEFAULT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (referrer_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (referred_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
 CREATE TABLE cosmetic_items (

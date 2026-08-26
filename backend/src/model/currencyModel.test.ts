@@ -10,11 +10,15 @@ vi.mock("./db", () => ({
 import db from "./db";
 import {
 	InsufficientFundsError,
+	InsufficientFreePacksError,
 	STARTER_CURRENCY,
 	FIRST_LOGIN_REWARD,
 	getBalance,
 	credit,
 	debit,
+	getFreePacks,
+	creditFreePacks,
+	debitFreePack,
 	getCreditedAmountForReference,
 	countReasonToday,
 	claimStarterBonus,
@@ -91,6 +95,67 @@ describe("debit", () => {
 		const connection = { query: vi.fn().mockResolvedValueOnce([[{ soft_currency: 500 }]]).mockResolvedValue([{}]) };
 
 		await debit(1, 100, "card_buy", undefined, connection as never);
+
+		expect(connection.query).toHaveBeenNthCalledWith(1, expect.stringContaining("FOR UPDATE"), [1]);
+		expect(mockedDb.query).not.toHaveBeenCalled();
+	});
+});
+
+describe("getFreePacks", () => {
+	beforeEach(() => vi.clearAllMocks());
+
+	it("returns 0 when the user row is missing", async () => {
+		mockedDb.query.mockResolvedValueOnce([[]]);
+		expect(await getFreePacks(999)).toBe(0);
+	});
+
+	it("returns the stored free_packs count", async () => {
+		mockedDb.query.mockResolvedValueOnce([[{ free_packs: 2 }]]);
+		expect(await getFreePacks(1)).toBe(2);
+	});
+});
+
+describe("creditFreePacks", () => {
+	beforeEach(() => vi.clearAllMocks());
+
+	it("increments free_packs by the given amount", async () => {
+		mockedDb.query.mockResolvedValue([{}]);
+
+		await creditFreePacks(1, 3);
+
+		expect(mockedDb.query).toHaveBeenCalledWith(
+			expect.stringContaining("free_packs = free_packs + ?"),
+			[3, 1],
+		);
+	});
+});
+
+describe("debitFreePack", () => {
+	beforeEach(() => vi.clearAllMocks());
+
+	it("throws InsufficientFreePacksError and never mutates the balance when there is none left", async () => {
+		mockedDb.query.mockResolvedValueOnce([[{ free_packs: 0 }]]);
+
+		await expect(debitFreePack(1)).rejects.toThrow(InsufficientFreePacksError);
+		expect(mockedDb.query).toHaveBeenCalledTimes(1);
+	});
+
+	it("decrements free_packs by 1 when at least one is available", async () => {
+		mockedDb.query.mockResolvedValueOnce([[{ free_packs: 2 }]]).mockResolvedValue([{}]);
+
+		await debitFreePack(1);
+
+		expect(mockedDb.query).toHaveBeenNthCalledWith(
+			2,
+			expect.stringContaining("free_packs = free_packs - 1"),
+			[1],
+		);
+	});
+
+	it("locks the row with FOR UPDATE when run inside a transaction", async () => {
+		const connection = { query: vi.fn().mockResolvedValueOnce([[{ free_packs: 1 }]]).mockResolvedValue([{}]) };
+
+		await debitFreePack(1, connection as never);
 
 		expect(connection.query).toHaveBeenNthCalledWith(1, expect.stringContaining("FOR UPDATE"), [1]);
 		expect(mockedDb.query).not.toHaveBeenCalled();
