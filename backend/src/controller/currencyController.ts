@@ -1,6 +1,6 @@
 import { Request, Response } from "express";
 
-import { getBalance, claimStarterBonus, claimFirstLoginReward } from "../model/currencyModel";
+import { getBalance, getFreePacks, claimStarterBonus, claimFirstLoginReward } from "../model/currencyModel";
 import { getUserId } from "../helper/requestUser";
 
 const getMyBalance = async (req: Request, res: Response): Promise<void> => {
@@ -11,8 +11,8 @@ const getMyBalance = async (req: Request, res: Response): Promise<void> => {
 			return;
 		}
 
-		const balance = await getBalance(userId);
-		res.status(200).json({ balance });
+		const [balance, freePacks] = await Promise.all([getBalance(userId), getFreePacks(userId)]);
+		res.status(200).json({ balance, free_packs: freePacks });
 	} catch (error) {
 		console.error(error);
 		res.status(500).json({ message: "Server error" });

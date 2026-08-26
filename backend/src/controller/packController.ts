@@ -1,7 +1,7 @@
 import { Request, Response } from "express";
 
-import { openPack, PACK_COST } from "../model/packModel";
-import { InsufficientFundsError } from "../model/currencyModel";
+import { openPack, openOwnedPack, PACK_COST } from "../model/packModel";
+import { InsufficientFundsError, InsufficientFreePacksError } from "../model/currencyModel";
 import { getUserId } from "../helper/requestUser";
 
 const handleOpenPack = async (req: Request, res: Response, free: boolean): Promise<void> => {
@@ -37,4 +37,27 @@ const openFreePackHandler = async (req: Request, res: Response): Promise<void> =
 	await handleOpenPack(req, res, true);
 };
 
-export { openPackHandler, openFreePackHandler };
+// Ouvre un pack en consommant le solde de packs gratuits gagnés (quêtes
+// hebdo, parrainage) — distinct de openFreePackHandler ci-dessus (route dev
+// sans aucun coût, gardée par DEV_FREE_PACKS).
+const openOwnedPackHandler = async (req: Request, res: Response): Promise<void> => {
+	try {
+		const userId = getUserId(req);
+		if (!userId) {
+			res.status(401).json({ message: "Non authentifié" });
+			return;
+		}
+
+		const { cards, free_packs } = await openOwnedPack(userId);
+		res.status(200).json({ cards, free_packs });
+	} catch (error) {
+		if (error instanceof InsufficientFreePacksError) {
+			res.status(400).json({ message: error.message });
+			return;
+		}
+		console.error(error);
+		res.status(500).json({ message: "Server error" });
+	}
+};
+
+export { openPackHandler, openFreePackHandler, openOwnedPackHandler };

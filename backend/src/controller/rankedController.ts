@@ -9,6 +9,7 @@ import {
 	getLeaderboard,
 } from "../model/rankedModel";
 import { progressForMatch } from "../model/questModel";
+import { progressForMatch as progressWeeklyForMatch } from "../model/weeklyQuestModel";
 import { getUserId } from "../helper/requestUser";
 
 const reportMatch = async (req: Request, res: Response): Promise<void> => {
@@ -75,6 +76,10 @@ const reportMatch = async (req: Request, res: Response): Promise<void> => {
 		await progressForMatch(opponentId, "ranked", winnerId === opponentId, {
 			cardsPlayedByRace: opponentReport.cards_played_by_race ?? undefined,
 			deckRaces: opponentReport.deck_races ?? undefined,
+		});
+		await progressWeeklyForMatch(userId, "ranked", winnerId === userId, { cardsPlayedByRace });
+		await progressWeeklyForMatch(opponentId, "ranked", winnerId === opponentId, {
+			cardsPlayedByRace: opponentReport.cards_played_by_race ?? undefined,
 		});
 		res.status(200).json({ status: "confirmed" });
 	} catch (error) {

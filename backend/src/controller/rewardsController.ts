@@ -3,6 +3,7 @@ import { Request, Response } from "express";
 import { credit, getBalance } from "../model/currencyModel";
 import { incrementResult } from "../model/soloStatsModel";
 import { progressForMatch } from "../model/questModel";
+import { progressForMatch as progressWeeklyForMatch } from "../model/weeklyQuestModel";
 import { getUserId } from "../helper/requestUser";
 
 const SOLO_WIN_BASE_REWARD = 10;
@@ -54,6 +55,7 @@ const reportSoloMatch = async (req: Request, res: Response): Promise<void> => {
 		const won = result === "victory";
 		const winStreak = await incrementResult(userId, won);
 		await progressForMatch(userId, "solo", won, { cardsPlayedByRace, deckRaces });
+		await progressWeeklyForMatch(userId, "solo", won, { cardsPlayedByRace });
 
 		const reward = won ? rewardForWinStreak(winStreak) : SOLO_DEFEAT_REWARD;
 		const reason = won ? SOLO_WIN_REASON : SOLO_DEFEAT_REASON;

@@ -12,6 +12,9 @@ vi.mock("../model/rankedModel", () => ({
 vi.mock("../model/questModel", () => ({
 	progressForMatch: vi.fn(),
 }));
+vi.mock("../model/weeklyQuestModel", () => ({
+	progressForMatch: vi.fn(),
+}));
 
 import {
 	getStats,
@@ -22,6 +25,7 @@ import {
 	getLeaderboard,
 } from "../model/rankedModel";
 import { progressForMatch } from "../model/questModel";
+import { progressForMatch as progressWeeklyForMatch } from "../model/weeklyQuestModel";
 import { reportMatch, getMyStats, getLeaderboardHandler } from "./rankedController";
 
 const mocked = {
@@ -32,6 +36,7 @@ const mocked = {
 	confirmMatch: confirmMatch as ReturnType<typeof vi.fn>,
 	getLeaderboard: getLeaderboard as ReturnType<typeof vi.fn>,
 	progressForMatch: progressForMatch as ReturnType<typeof vi.fn>,
+	progressWeeklyForMatch: progressWeeklyForMatch as ReturnType<typeof vi.fn>,
 };
 
 const mockRes = (): Response => {
