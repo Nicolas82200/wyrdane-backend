@@ -55,7 +55,7 @@ describe("reportSoloMatch", () => {
 		expect(mocked.credit).not.toHaveBeenCalled();
 	});
 
-	it("records the stat and progresses quests for a defeat", async () => {
+	it("records the stat and progresses quests for a defeat, without crediting any gold", async () => {
 		mocked.incrementResult.mockResolvedValue(0);
 		const req = reqAs(1, { result: "defeat" });
 		const res = mockRes();
@@ -67,57 +67,25 @@ describe("reportSoloMatch", () => {
 			cardsPlayedByRace: undefined,
 			deckRaces: undefined,
 		});
+		expect(mocked.credit).not.toHaveBeenCalled();
+		expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ credited: false, reward: 0 }));
 	});
 
-	it("credits a flat reward for a defeat, with no daily cap", async () => {
-		mocked.incrementResult.mockResolvedValue(0);
-		const req = reqAs(1, { result: "defeat" });
-		const res = mockRes();
-
-		await reportSoloMatch(req, res);
-
-		expect(mocked.credit).toHaveBeenCalledWith(1, 5, "match_loss_solo");
-		expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ credited: true, reward: 5 }));
-	});
-
-	it("credits the base win reward below a 3-win streak", async () => {
-		mocked.incrementResult.mockResolvedValue(2);
+	it("records the stat and progresses quests for a victory, without crediting any gold", async () => {
+		mocked.incrementResult.mockResolvedValue(4);
 		const req = reqAs(1, { result: "victory" });
 		const res = mockRes();
 
 		await reportSoloMatch(req, res);
 
-		expect(mocked.credit).toHaveBeenCalledWith(1, 10, "match_win_solo");
-		expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ credited: true, reward: 10, winStreak: 2 }));
-	});
-
-	it("credits 15 gold at a 3-win streak", async () => {
-		mocked.incrementResult.mockResolvedValue(3);
-		const req = reqAs(1, { result: "victory" });
-		const res = mockRes();
-
-		await reportSoloMatch(req, res);
-
-		expect(mocked.credit).toHaveBeenCalledWith(1, 15, "match_win_solo");
-	});
-
-	it("credits 20 gold at a 5-win streak", async () => {
-		mocked.incrementResult.mockResolvedValue(5);
-		const req = reqAs(1, { result: "victory" });
-		const res = mockRes();
-
-		await reportSoloMatch(req, res);
-
-		expect(mocked.credit).toHaveBeenCalledWith(1, 20, "match_win_solo");
-	});
-
-	it("credits 25 gold at a 7-win streak and beyond", async () => {
-		mocked.incrementResult.mockResolvedValue(9);
-		const req = reqAs(1, { result: "victory" });
-		const res = mockRes();
-
-		await reportSoloMatch(req, res);
-
-		expect(mocked.credit).toHaveBeenCalledWith(1, 25, "match_win_solo");
+		expect(mocked.incrementResult).toHaveBeenCalledWith(1, true);
+		expect(mocked.progressForMatch).toHaveBeenCalledWith(1, "solo", true, {
+			cardsPlayedByRace: undefined,
+			deckRaces: undefined,
+		});
+		expect(mocked.credit).not.toHaveBeenCalled();
+		expect(res.json).toHaveBeenCalledWith(
+			expect.objectContaining({ credited: false, reward: 0, winStreak: 4, balance: 1000 }),
+		);
 	});
 });

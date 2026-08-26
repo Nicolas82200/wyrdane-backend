@@ -9,6 +9,7 @@ import {
 	getLeaderboard,
 } from "../model/rankedModel";
 import { progressForMatch } from "../model/questModel";
+import { getBalance, getCreditedAmountForReference } from "../model/currencyModel";
 import { getUserId } from "../helper/requestUser";
 
 const reportMatch = async (req: Request, res: Response): Promise<void> => {
@@ -39,13 +40,21 @@ const reportMatch = async (req: Request, res: Response): Promise<void> => {
 
 		const existingMatch = await findMatchHistory(clientMatchId);
 		if (existingMatch) {
-			res.status(200).json({ status: "confirmed", match: existingMatch });
+			// Le montant exact (vainqueur ou perdant, variable selon la série de
+			// victoires au moment du match) n'est pas recalculable après coup de
+			// façon fiable : on relit ce que confirmMatch a réellement crédité.
+			const reward = await getCreditedAmountForReference(userId, clientMatchId);
+			res.status(200).json({ status: "confirmed", match: existingMatch, reward, balance: await getBalance(userId) });
 			return;
 		}
 
 		const ownReport = await findReport(clientMatchId, userId);
 		if (ownReport) {
-			res.status(409).json({ message: "Match déjà reporté par ce joueur" });
+			// Toujours en attente du rapport du pair (voir plus bas) : pas une
+			// erreur — le client réessaie cet appel jusqu'à confirmation (voir
+			// MatchResultReporter._report_ranked côté client), donc un second
+			// appel du même joueur pour le même match est attendu et normal.
+			res.status(202).json({ status: "pending" });
 			return;
 		}
 
@@ -65,7 +74,7 @@ const reportMatch = async (req: Request, res: Response): Promise<void> => {
 			return;
 		}
 
-		await confirmMatch(clientMatchId, userId, opponentId, winnerId);
+		const { reward } = await confirmMatch(clientMatchId, userId, opponentId, winnerId);
 		// Une fois par joueur, jamais deux fois (confirmMatch ne s'exécute qu'une
 		// seule fois par match — voir le court-circuit findMatchHistory plus haut).
 		// Chaque joueur ne fait progresser ses quêtes de race qu'avec les données
@@ -76,7 +85,7 @@ const reportMatch = async (req: Request, res: Response): Promise<void> => {
 			cardsPlayedByRace: opponentReport.cards_played_by_race ?? undefined,
 			deckRaces: opponentReport.deck_races ?? undefined,
 		});
-		res.status(200).json({ status: "confirmed" });
+		res.status(200).json({ status: "confirmed", reward, balance: await getBalance(userId) });
 	} catch (error) {
 		console.error(error);
 		res.status(500).json({ message: "Server error" });
