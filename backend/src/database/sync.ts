@@ -62,6 +62,26 @@ const ensureSoloStatsColumns = async (connection: mysql.Connection): Promise<voi
 	}
 };
 
+// win_streak ajoutée à ranked_stats après sa création initiale (voir
+// schema.sql) — même pattern que ensureSoloStatsColumns.
+const RANKED_STATS_COLUMNS_TO_ENSURE: { name: string; ddl: string }[] = [
+	{ name: "win_streak", ddl: "win_streak INT NOT NULL DEFAULT 0" },
+];
+
+const ensureRankedStatsColumns = async (connection: mysql.Connection): Promise<void> => {
+	const [rows] = await connection.query<mysql.RowDataPacket[]>(
+		"SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'ranked_stats'",
+		[DB_NAME],
+	);
+	const existing = new Set(rows.map((row) => row.COLUMN_NAME as string));
+
+	for (const column of RANKED_STATS_COLUMNS_TO_ENSURE) {
+		if (existing.has(column.name)) continue;
+		console.log(`→ Ajout de la colonne ranked_stats.${column.name}...`);
+		await connection.query(`ALTER TABLE ranked_stats ADD COLUMN ${column.ddl}`);
+	}
+};
+
 // username n'a plus vocation à être unique (voir schema.sql) : c'est
 // désormais le pseudo Steam affiché, que plusieurs joueurs peuvent partager.
 // Un index inline UNIQUE ancien est nommé comme la colonne par défaut en
@@ -117,8 +137,9 @@ const main = async (): Promise<void> => {
 		await dropUsernameUniqueIndex(connection);
 		const sql = readFileSync(SCHEMA_SYNC_PATH, "utf8");
 		await connection.query(sql);
-		// Après le CREATE TABLE IF NOT EXISTS ci-dessus : solo_stats/match_reports
-		// sont garanties d'exister avant qu'on tente d'y ajouter une colonne.
+		// Après le CREATE TABLE IF NOT EXISTS ci-dessus : ranked_stats/solo_stats/
+		// match_reports sont garanties d'exister avant qu'on tente d'y ajouter une colonne.
+		await ensureRankedStatsColumns(connection);
 		await ensureSoloStatsColumns(connection);
 		await ensureMatchReportsColumns(connection);
 		console.log("✓ Schéma à jour, aucune donnée existante affectée.");

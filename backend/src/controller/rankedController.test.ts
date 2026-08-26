@@ -15,6 +15,10 @@ vi.mock("../model/questModel", () => ({
 vi.mock("../model/weeklyQuestModel", () => ({
 	progressForMatch: vi.fn(),
 }));
+vi.mock("../model/currencyModel", () => ({
+	getBalance: vi.fn(),
+	getCreditedAmountForReference: vi.fn(),
+}));
 
 import {
 	getStats,
@@ -26,6 +30,7 @@ import {
 } from "../model/rankedModel";
 import { progressForMatch } from "../model/questModel";
 import { progressForMatch as progressWeeklyForMatch } from "../model/weeklyQuestModel";
+import { getBalance, getCreditedAmountForReference } from "../model/currencyModel";
 import { reportMatch, getMyStats, getLeaderboardHandler } from "./rankedController";
 
 const mocked = {
@@ -37,6 +42,8 @@ const mocked = {
 	getLeaderboard: getLeaderboard as ReturnType<typeof vi.fn>,
 	progressForMatch: progressForMatch as ReturnType<typeof vi.fn>,
 	progressWeeklyForMatch: progressWeeklyForMatch as ReturnType<typeof vi.fn>,
+	getBalance: getBalance as ReturnType<typeof vi.fn>,
+	getCreditedAmountForReference: getCreditedAmountForReference as ReturnType<typeof vi.fn>,
 };
 
 const mockRes = (): Response => {
@@ -81,19 +88,37 @@ describe("reportMatch", () => {
 		expect(res.status).toHaveBeenCalledWith(400);
 	});
 
-	it("short-circuits to confirmed if the match was already settled (idempotent retry)", async () => {
+	it("short-circuits to confirmed if the match was already settled (idempotent retry), returning the caller's actual credited amount", async () => {
 		mocked.findMatchHistory.mockResolvedValue({ id: 1, winner_id: 1 });
+		mocked.getCreditedAmountForReference.mockResolvedValue(15);
+		mocked.getBalance.mockResolvedValue(1100);
 		const req = reqAs(1, { clientMatchId: "m1", opponentId: 2, winnerId: 1 });
 		const res = mockRes();
 
 		await reportMatch(req, res);
 
+		expect(mocked.getCreditedAmountForReference).toHaveBeenCalledWith(1, "m1");
 		expect(res.status).toHaveBeenCalledWith(200);
-		expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ status: "confirmed" }));
+		expect(res.json).toHaveBeenCalledWith(
+			expect.objectContaining({ status: "confirmed", reward: 15, balance: 1100 }),
+		);
 		expect(mocked.createReport).not.toHaveBeenCalled();
 	});
 
-	it("rejects a second report from the same reporter for the same match (409)", async () => {
+	it("returns whatever the losing side was actually credited on idempotent retry (defeat still rewards a flat amount)", async () => {
+		mocked.findMatchHistory.mockResolvedValue({ id: 1, winner_id: 2 });
+		mocked.getCreditedAmountForReference.mockResolvedValue(5);
+		mocked.getBalance.mockResolvedValue(1000);
+		const req = reqAs(1, { clientMatchId: "m1", opponentId: 2, winnerId: 2 });
+		const res = mockRes();
+
+		await reportMatch(req, res);
+
+		expect(res.status).toHaveBeenCalledWith(200);
+		expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ status: "confirmed", reward: 5 }));
+	});
+
+	it("returns pending (not an error) on a retried report while the peer hasn't reported yet", async () => {
 		mocked.findMatchHistory.mockResolvedValue(null);
 		mocked.findReport.mockResolvedValue({ id: 5, reporter_id: 1 });
 		const req = reqAs(1, { clientMatchId: "m1", opponentId: 2, winnerId: 1 });
@@ -101,7 +126,7 @@ describe("reportMatch", () => {
 
 		await reportMatch(req, res);
 
-		expect(res.status).toHaveBeenCalledWith(409);
+		expect(res.status).toHaveBeenCalledWith(202);
 		expect(mocked.createReport).not.toHaveBeenCalled();
 	});
 
@@ -149,11 +174,13 @@ describe("reportMatch", () => {
 		expect(mocked.confirmMatch).not.toHaveBeenCalled();
 	});
 
-	it("confirms the match once both reports agree", async () => {
+	it("confirms the match once both reports agree, crediting/returning the winner's reward", async () => {
 		mocked.findMatchHistory.mockResolvedValue(null);
 		mocked.findReport
 			.mockResolvedValueOnce(null)
 			.mockResolvedValueOnce({ opponent_id: 1, winner_id: 1 });
+		mocked.confirmMatch.mockResolvedValue({ reward: 100 });
+		mocked.getBalance.mockResolvedValue(1100);
 		const req = reqAs(1, { clientMatchId: "m1", opponentId: 2, winnerId: 1 });
 		const res = mockRes();
 
@@ -161,7 +188,9 @@ describe("reportMatch", () => {
 
 		expect(mocked.confirmMatch).toHaveBeenCalledWith("m1", 1, 2, 1);
 		expect(res.status).toHaveBeenCalledWith(200);
-		expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ status: "confirmed" }));
+		expect(res.json).toHaveBeenCalledWith(
+			expect.objectContaining({ status: "confirmed", reward: 100, balance: 1100 }),
+		);
 	});
 
 	it("progresses quests for both players once confirmed, with the correct win/loss flag each", async () => {
@@ -169,6 +198,7 @@ describe("reportMatch", () => {
 		mocked.findReport
 			.mockResolvedValueOnce(null)
 			.mockResolvedValueOnce({ opponent_id: 1, winner_id: 1 });
+		mocked.confirmMatch.mockResolvedValue({ reward: 100 });
 		const req = reqAs(1, { clientMatchId: "m1", opponentId: 2, winnerId: 1 });
 		const res = mockRes();
 
@@ -192,6 +222,7 @@ describe("reportMatch", () => {
 			cards_played_by_race: { Demon: 3 },
 			deck_races: ["Demon"],
 		});
+		mocked.confirmMatch.mockResolvedValue({ reward: 100 });
 		const req = reqAs(1, {
 			clientMatchId: "m1",
 			opponentId: 2,

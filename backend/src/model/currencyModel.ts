@@ -109,6 +109,20 @@ const debitFreePack = async (userId: number, connection?: PoolConnection): Promi
 	await runner.query("UPDATE users SET free_packs = free_packs - 1 WHERE id = ?", [userId]);
 };
 
+// Montant total crédité/débité à un joueur pour une référence donnée (ex. un
+// client_match_id ranked) : sert à retrouver après coup le montant exact
+// crédité par confirmMatch sur un rapport de match rejoué une fois déjà
+// confirmé (voir rankedController.reportMatch, branche "existingMatch") sans
+// avoir à recalculer un barème qui peut dépendre d'un état déjà muté (série
+// de victoires) entretemps.
+const getCreditedAmountForReference = async (userId: number, reference: string): Promise<number> => {
+	const [rows] = await db.query<(RowDataPacket & { amount: number })[]>(
+		"SELECT COALESCE(SUM(amount), 0) AS amount FROM currency_ledger WHERE user_id = ? AND reference = ?",
+		[userId, reference],
+	);
+	return Number(rows[0]?.amount ?? 0);
+};
+
 // Nombre de mouvements positifs déjà journalisés aujourd'hui pour une raison
 // donnée (ex. 'match_win_solo') : base du plafond quotidien anti-farming.
 const countReasonToday = async (userId: number, reason: string): Promise<number> => {
@@ -208,6 +222,7 @@ export {
 	getFreePacks,
 	creditFreePacks,
 	debitFreePack,
+	getCreditedAmountForReference,
 	countReasonToday,
 	claimStarterBonus,
 	claimFirstLoginReward,
