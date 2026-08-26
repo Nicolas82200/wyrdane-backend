@@ -114,11 +114,16 @@ CREATE TABLE deck_cards (
   UNIQUE KEY unique_deck_card (deck_id, card_id)
 );
 
+-- win_streak : victoires classées consécutives en cours pour ce joueur,
+-- remise à 0 par n'importe quelle défaite (voir rankedModel.confirmMatch) —
+-- sert de palier au bonus d'or, même barème que l'ancienne récompense solo
+-- (voir WIN_STREAK_REWARD_TIERS), distinct de `wins` qui ne fait qu'accumuler.
 CREATE TABLE ranked_stats (
   user_id INT PRIMARY KEY,
   mmr INT NOT NULL DEFAULT 1000,
   wins INT NOT NULL DEFAULT 0,
   losses INT NOT NULL DEFAULT 0,
+  win_streak INT NOT NULL DEFAULT 0,
   season INT NOT NULL DEFAULT 1,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );

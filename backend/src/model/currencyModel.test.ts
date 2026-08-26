@@ -15,6 +15,7 @@ import {
 	getBalance,
 	credit,
 	debit,
+	getCreditedAmountForReference,
 	countReasonToday,
 	claimStarterBonus,
 	claimFirstLoginReward,
@@ -93,6 +94,21 @@ describe("debit", () => {
 
 		expect(connection.query).toHaveBeenNthCalledWith(1, expect.stringContaining("FOR UPDATE"), [1]);
 		expect(mockedDb.query).not.toHaveBeenCalled();
+	});
+});
+
+describe("getCreditedAmountForReference", () => {
+	beforeEach(() => vi.clearAllMocks());
+
+	it("returns 0 when no ledger entry matches", async () => {
+		mockedDb.query.mockResolvedValueOnce([[{ amount: 0 }]]);
+		expect(await getCreditedAmountForReference(1, "match-1")).toBe(0);
+	});
+
+	it("returns the summed ledger amount for that user and reference", async () => {
+		mockedDb.query.mockResolvedValueOnce([[{ amount: 15 }]]);
+		expect(await getCreditedAmountForReference(1, "match-1")).toBe(15);
+		expect(mockedDb.query).toHaveBeenCalledWith(expect.stringContaining("SUM(amount)"), [1, "match-1"]);
 	});
 });
 

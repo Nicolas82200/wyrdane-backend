@@ -7,10 +7,9 @@ import {
 	createReport,
 	confirmMatch,
 	getLeaderboard,
-	RANKED_WIN_REWARD,
 } from "../model/rankedModel";
 import { progressForMatch } from "../model/questModel";
-import { getBalance } from "../model/currencyModel";
+import { getBalance, getCreditedAmountForReference } from "../model/currencyModel";
 import { getUserId } from "../helper/requestUser";
 
 const reportMatch = async (req: Request, res: Response): Promise<void> => {
@@ -41,7 +40,10 @@ const reportMatch = async (req: Request, res: Response): Promise<void> => {
 
 		const existingMatch = await findMatchHistory(clientMatchId);
 		if (existingMatch) {
-			const reward = existingMatch.winner_id === userId ? RANKED_WIN_REWARD : 0;
+			// Le montant exact (vainqueur ou perdant, variable selon la série de
+			// victoires au moment du match) n'est pas recalculable après coup de
+			// façon fiable : on relit ce que confirmMatch a réellement crédité.
+			const reward = await getCreditedAmountForReference(userId, clientMatchId);
 			res.status(200).json({ status: "confirmed", match: existingMatch, reward, balance: await getBalance(userId) });
 			return;
 		}
