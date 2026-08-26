@@ -95,12 +95,15 @@ const createReport = async (
 
 // Valide le match : calcule le nouveau MMR des deux joueurs et enregistre
 // l'historique, en transaction pour ne jamais désynchroniser stats/historique.
+// Renvoie la récompense créditée à player1Id (l'appelant côté contrôleur, voir
+// reportMatch) : RANKED_WIN_REWARD s'il est le vainqueur, 0 sinon (pas de
+// récompense de défaite en classé, contrairement au solo).
 const confirmMatch = async (
 	clientMatchId: string,
 	player1Id: number,
 	player2Id: number,
 	winnerId: number,
-): Promise<void> => {
+): Promise<{ reward: number }> => {
 	const connection = await db.getConnection();
 	try {
 		await connection.beginTransaction();
@@ -146,6 +149,7 @@ const confirmMatch = async (
 		await credit(winnerId, RANKED_WIN_REWARD, "match_win_ranked", clientMatchId, connection);
 
 		await connection.commit();
+		return { reward: winnerId === player1Id ? RANKED_WIN_REWARD : 0 };
 	} catch (error) {
 		await connection.rollback();
 		throw error;
@@ -172,6 +176,7 @@ const getLeaderboard = async (
 
 export {
 	CURRENT_SEASON,
+	RANKED_WIN_REWARD,
 	getStats,
 	findMatchHistory,
 	findReport,
