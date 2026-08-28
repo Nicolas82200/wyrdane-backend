@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { buildAuthUrl, verifyAssertion, steamOpenIdRealm } from "./steamOpenIdHelper";
+import { buildAuthUrl, verifyAssertion } from "./steamOpenIdHelper";
 
 afterEach(() => {
 	vi.unstubAllGlobals();
@@ -12,16 +12,6 @@ describe("buildAuthUrl", () => {
 		expect(url.searchParams.get("openid.mode")).toBe("checkid_setup");
 		expect(url.searchParams.get("openid.return_to")).toBe("https://api.wyrdane.example/callback");
 		expect(url.searchParams.get("openid.realm")).toBe("https://api.wyrdane.example");
-	});
-});
-
-describe("steamOpenIdRealm", () => {
-	it("wildcards the subdomain so Steam displays the root domain instead of api.*", () => {
-		expect(steamOpenIdRealm("https://wyrdane.com")).toBe("https://*.wyrdane.com/");
-	});
-
-	it("preserves the protocol", () => {
-		expect(steamOpenIdRealm("http://localhost:5173")).toBe("http://*.localhost/");
 	});
 });
 
