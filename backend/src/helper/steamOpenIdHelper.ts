@@ -20,19 +20,6 @@ const buildAuthUrl = (returnTo: string, realm: string): string => {
 	return url.toString();
 };
 
-// Domaine affiché par Steam sur l'écran de connexion ("Notez que [domaine]
-// n'est pas affilié à Steam ou Valve") : c'est openid.realm, pas
-// openid.return_to. On veut y afficher le domaine du site (wyrdane.com)
-// plutôt que celui de l'API (api.wyrdane.com) où vit réellement le callback
-// - un realm avec wildcard de sous-domaine (`https://*.wyrdane.com/`, syntaxe
-// standard OpenID 2.0/Steam) couvre justement ce sous-domaine tout en
-// affichant le domaine racine. return_to reste sur BACKEND_URL, seul realm
-// change.
-const steamOpenIdRealm = (frontendUrl: string): string => {
-	const { protocol, hostname } = new URL(frontendUrl);
-	return `${protocol}//*.${hostname}/`;
-};
-
 // Revalide les paramètres openid.* reçus sur le callback en les repostant à
 // Steam avec openid.mode=check_authentication. Renvoie le steamid si valide.
 const verifyAssertion = async (
@@ -57,4 +44,4 @@ const verifyAssertion = async (
 	return match ? match[1] : null;
 };
 
-export { buildAuthUrl, verifyAssertion, steamOpenIdRealm };
+export { buildAuthUrl, verifyAssertion };
