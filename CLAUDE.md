@@ -36,14 +36,30 @@ backend/
 
 ## Authentification — flow Steam
 
-1. Le client (jeu ou site web après un flow "Sign in through Steam" côté navigateur) obtient un ticket de session Steam.
+Deux flows cohabitent, tous deux terminés par le même JWT en cookie httpOnly :
+
+**Ticket de session (client de jeu, GodotSteam)**
+1. Le client obtient un ticket de session Steam (`Steam.getAuthSessionTicket()`).
 2. `POST /api/auth/steam` avec `{ ticket }` → `steamHelper.authenticateSteamTicket()` interroge l'API Web Steamworks pour valider le ticket et récupérer le `steamid`.
-3. Le backend cherche ce `steamid` dans `linked_accounts` (table qui associe un `user_id` interne à une identité externe : `provider` + `external_id`). S'il n'existe pas, un `user` et sa ligne `linked_accounts` sont créés en une transaction (`userModel.createWithSteamAccount`).
+
+**OpenID web (site compagnon, popup navigateur)**
+1. `GET /api/auth/steam/redirect` (`steamOpenIdHelper.buildAuthUrl`) redirige vers la page de connexion Steam officielle, avec un `realm`/`return_to` dérivé de l'origine de la requête (branding par domaine — site vs jeu si besoin un jour).
+2. Steam renvoie sur `GET /api/auth/steam/callback`, vérifié via `steamOpenIdHelper.verifyAssertion` (assertion OpenID, pas de ticket) pour en extraire le `steamid`.
+3. Le site web ouvre ce flow dans une popup (`useSteamLoginPopup.ts` côté `wyrdane-website`) plutôt qu'une redirection pleine page, pour rester sur la même page après connexion.
+
+**Commun aux deux flows**
+1. Le backend cherche ce `steamid` dans `linked_accounts` (table qui associe un `user_id` interne à une identité externe : `provider` + `external_id`). S'il n'existe pas, un `user` et sa ligne `linked_accounts` sont créés en une transaction (`userModel.createWithSteamAccount`).
+2. `ensureAdminFromEnv` marque le compte admin si son `steamid` figure dans `ADMIN_STEAM_IDS` (variable d'env, liste séparée par virgules) — vérifié à chaque login, pas seulement à la création du compte.
+3. `recordLogin` journalise la connexion (origine site vs jeu, déduite du flow utilisé) — alimente le tableau de bord admin (`GET /api/admin/stats`).
 4. Un JWT `{ id, name }` est signé et posé en cookie httpOnly `auth_token` — identique à l'ancien flow email/mot de passe, seule l'étape de vérification d'identité a changé.
 
 **Pourquoi `linked_accounts` plutôt qu'une colonne `steam_id` sur `users`** : ça garde la porte ouverte à d'autres providers (email, Google, Apple Sign-In) si un client mobile voit le jour un jour, sans avoir à migrer le schéma ni changer l'identifiant interne du joueur (`user_id`) qui porte déjà collection/decks/progression.
 
-Variables d'environnement nécessaires (voir `.env.sample`) : `STEAM_WEB_API_KEY` et `STEAM_APP_ID` (clé Web API générée sur https://partner.steamgames.com pour l'AppID du jeu).
+Variables d'environnement nécessaires (voir `.env.sample`) : `STEAM_WEB_API_KEY` et `STEAM_APP_ID` (clé Web API générée sur https://partner.steamgames.com pour l'AppID du jeu), `ADMIN_STEAM_IDS` (comptes admin).
+
+## Admin & analytics
+
+Routes protégées par statut admin (`adminRouter.ts`) : `GET /api/admin/me` (vérifie le statut admin du compte courant), `GET /api/admin/stats` (fréquentation, connexions Steam par origine site/jeu, utilisateurs uniques — alimenté par `recordLogin` et le tracking de pageviews), `PUT /api/admin/wishlist` (compteur de wishlist Steam saisi manuellement, pas d'API Steamworks publique pour ce chiffre). Consommé côté site par une page `/admin` non listée dans la navigation (accès direct par URL). Pageviews trackées via `POST /api/analytics/pageview` (`analyticsRouter.ts`), appelé à chaque navigation SPA côté site (`usePageviewTracking.ts`).
 
 ## Lancer le projet
 
@@ -84,6 +100,10 @@ Contrat d'origine (côté client, écrit avant implémentation) : `E:\card-game\
 **Solde de packs gratuits** (`users.free_packs`, `currencyModel.getFreePacks`/`creditFreePacks`/`debitFreePack`) : alimenté par les quêtes hebdo et le parrainage, consommé par `POST /api/packs/open-owned` (`packModel.openOwnedPack`, mêmes probabilités de tirage que `openPack`, juste une source de débit différente — logique de tirage/octroi factorisée dans `drawAndGrantCards`). Exposé en lecture via `GET /api/currency/balance` (`free_packs` ajouté à côté de `balance`). Pas de ledger dédié comme `currency_ledger` : une seule source de valeur, pas d'audit fin nécessaire pour l'instant.
 
 **Parrainage** (`referralModel.ts`, table `referrals`) : un joueur ne peut parrainer qu'**un seul** ami — `referrer_id UNIQUE` posé en contrainte de schéma plutôt qu'en logique applicative, pour ne jamais pouvoir être contourné par une course entre requêtes concurrentes. `referred_id UNIQUE` (NULL autorisé tant que non utilisé) empêche symétriquement qu'un compte soit parrainé deux fois, par qui que ce soit. `GET /api/referral/code` génère le code paresseusement (8 caractères, alphabet sans caractères ambigus 0/O/1/I) ; `GET /api/referral/status` ; `POST /api/referral/redeem` (appelé par le **filleul**) valide le code puis pose `referred_id`/`redeemed_at`. La récompense (3 packs + 500 or, `REFERRAL_REWARD_PACKS`/`REFERRAL_REWARD_GOLD`) est créditée au **parrain**, pas au filleul, et déclenchée par la fin du tutoriel du filleul — pas de nouvelle route dédiée : `collectionController.claimStarter` appelle `referralModel.completeReferralIfPending` dans la même transaction que le reste de claim-starter (idempotent via `reward_granted_at`). Cas particulier géré : un code entré *après* que le filleul a déjà fini son tutoriel (`users.starter_claimed_at` déjà posé) déclenche la récompense immédiatement dans `redeemCode`, plutôt que d'attendre un `claim-starter` qui ne sera jamais rappelé pour ce compte.
+
+## Tests automatisés
+
+Framework : **Vitest**. Lancer toute la suite : `cd backend && npm run test` (`vitest run`). ~25 fichiers `*.test.ts` couvrant controllers/models/helpers (auth, decks, packs, quêtes, ranked, parrainage, récompense de connexion, contact, helper Elo, JWT, helpers Steam...). Toute nouvelle route ou logique métier non triviale mérite un test, en suivant le pattern déjà en place (test du controller/model concerné, pas de test d'intégration HTTP bout-en-bout).
 
 ## Déploiement / Infra (VPS)
 
