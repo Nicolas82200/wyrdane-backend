@@ -7,6 +7,7 @@ vi.mock("../helper/steamHelper", () => ({
 }));
 vi.mock("../helper/steamOpenIdHelper", () => ({
 	buildAuthUrl: vi.fn(() => "https://steamcommunity.com/openid/login?mock=1"),
+	steamOpenIdRealm: vi.fn(() => "https://*.wyrdane.example/"),
 	verifyAssertion: vi.fn(),
 }));
 vi.mock("../model/userModel", () => ({

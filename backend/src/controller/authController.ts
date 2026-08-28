@@ -1,7 +1,7 @@
 import { Request, Response } from "express";
 
 import { authenticateSteamTicket, fetchSteamPersonaName } from "../helper/steamHelper";
-import { buildAuthUrl, verifyAssertion } from "../helper/steamOpenIdHelper";
+import { buildAuthUrl, verifyAssertion, steamOpenIdRealm } from "../helper/steamOpenIdHelper";
 import {
 	findBySteamId,
 	createWithSteamAccount,
@@ -108,7 +108,12 @@ const steamOpenIdRedirect = (req: Request, res: Response): void => {
 	const backendUrl = process.env.BACKEND_URL as string;
 	const isPopup = req.query.popup === "1";
 	const returnTo = `${backendUrl}/api/auth/steam/callback${isPopup ? "?popup=1" : ""}`;
-	res.redirect(buildAuthUrl(returnTo, backendUrl));
+	// realm ≠ return_to : return_to reste sur l'API (où vit le callback), le
+	// realm dérive du site (FRONTEND_URL) via un wildcard de sous-domaine
+	// pour que Steam affiche "wyrdane.com" plutôt que "api.wyrdane.com" sur
+	// son écran de connexion (voir steamOpenIdRealm).
+	const realm = steamOpenIdRealm(process.env.FRONTEND_URL as string);
+	res.redirect(buildAuthUrl(returnTo, realm));
 };
 
 // Page minimaliste renvoyée dans la popup de connexion (voir AuthPanel.tsx) :
