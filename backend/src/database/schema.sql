@@ -38,9 +38,9 @@ CREATE TABLE users (
   -- regrant/recréer les decks de départ si le joueur relance la réclamation.
   starter_claimed_at TIMESTAMP NULL DEFAULT NULL,
   -- Rempli par POST /api/currency/claim-starter-bonus : bonus de départ
-  -- (1000, voir currencyModel.claimStarterBonus) distinct de starter_claimed_at
+  -- (250, voir currencyModel.claimStarterBonus) distinct de starter_claimed_at
   -- (cartes/decks) pour les comptes créés avant l'ajout de ce bonus, qui
-  -- reçoivent désormais 1000 dès la création (voir userModel.createWithSteamAccount).
+  -- reçoivent désormais 250 dès la création (voir userModel.createWithSteamAccount).
   starter_currency_claimed_at TIMESTAMP NULL DEFAULT NULL,
   -- Rempli par POST /api/currency/claim-first-login-bonus : quête cachée de
   -- première connexion Steam (500, voir currencyModel.claimFirstLoginReward).
