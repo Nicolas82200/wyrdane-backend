@@ -129,7 +129,7 @@ const confirmMatch = async (
 	player1Id: number,
 	player2Id: number,
 	winnerId: number,
-): Promise<{ reward: number }> => {
+): Promise<{ reward: number; ratingA: number; ratingB: number }> => {
 	const connection = await db.getConnection();
 	try {
 		await connection.beginTransaction();
@@ -188,8 +188,10 @@ const confirmMatch = async (
 
 		await connection.commit();
 		// reward1 est déjà la récompense de player1Id dans tous les cas (victoire
-		// ou défaite) : voir son calcul plus haut.
-		return { reward: reward1 };
+		// ou défaite) : voir son calcul plus haut. ratingA/ratingB renvoyés pour
+		// que l'appelant (rankedController) puisse faire progresser les quêtes
+		// uniques de palier ranked sans requête supplémentaire.
+		return { reward: reward1, ratingA: newRatingA, ratingB: newRatingB };
 	} catch (error) {
 		await connection.rollback();
 		throw error;

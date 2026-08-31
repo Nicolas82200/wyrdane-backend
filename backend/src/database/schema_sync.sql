@@ -150,6 +150,21 @@ CREATE TABLE IF NOT EXISTS weekly_quests (
   UNIQUE KEY unique_user_quest_week_slot (user_id, week_start, slot)
 );
 
+CREATE TABLE IF NOT EXISTS unique_quests (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  user_id INT NOT NULL,
+  quest_code VARCHAR(40) NOT NULL,
+  progress INT NOT NULL DEFAULT 0,
+  target INT NOT NULL,
+  reward_currency INT NOT NULL DEFAULT 0,
+  reward_pack INT NOT NULL DEFAULT 0,
+  meta VARCHAR(100) NULL,
+  claimed_at TIMESTAMP NULL DEFAULT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  UNIQUE KEY unique_user_quest_code (user_id, quest_code)
+);
+
 CREATE TABLE IF NOT EXISTS referrals (
   id INT AUTO_INCREMENT PRIMARY KEY,
   referrer_id INT NOT NULL UNIQUE,

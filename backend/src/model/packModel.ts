@@ -3,6 +3,7 @@ import type { PoolConnection } from "mysql2/promise";
 import db from "./db";
 import { grantCard, getOwnedQuantity, MAX_COPIES_PER_CARD, DUST_VALUE_BY_RARITY } from "./collectionModel";
 import { credit, debit, debitFreePack, getBalance, getFreePacks } from "./currencyModel";
+import { progressForPackOpen } from "./uniqueQuestModel";
 
 import type { Cards } from "../types";
 
@@ -106,6 +107,7 @@ const openPack = async (userId: number, free = false): Promise<{ cards: DrawResu
 
 		await connection.commit();
 		const balance = await getBalance(userId);
+		await progressForPackOpen(userId);
 		return { cards: results, balance };
 	} catch (error) {
 		await connection.rollback();
@@ -130,6 +132,7 @@ const openOwnedPack = async (userId: number): Promise<{ cards: DrawResult[]; fre
 		const results = await drawAndGrantCards(userId, pool, connection);
 
 		await connection.commit();
+		await progressForPackOpen(userId);
 		return { cards: results, free_packs: await getFreePacks(userId) };
 	} catch (error) {
 		await connection.rollback();

@@ -10,6 +10,7 @@ import {
 } from "../model/rankedModel";
 import { progressForMatch } from "../model/questModel";
 import { progressForMatch as progressWeeklyForMatch } from "../model/weeklyQuestModel";
+import { progressForMatch as progressUniqueForMatch, progressForRankTier } from "../model/uniqueQuestModel";
 import { getBalance, getCreditedAmountForReference } from "../model/currencyModel";
 import { getUserId } from "../helper/requestUser";
 
@@ -75,7 +76,7 @@ const reportMatch = async (req: Request, res: Response): Promise<void> => {
 			return;
 		}
 
-		const { reward } = await confirmMatch(clientMatchId, userId, opponentId, winnerId);
+		const { reward, ratingA, ratingB } = await confirmMatch(clientMatchId, userId, opponentId, winnerId);
 		// Une fois par joueur, jamais deux fois (confirmMatch ne s'exécute qu'une
 		// seule fois par match — voir le court-circuit findMatchHistory plus haut).
 		// Chaque joueur ne fait progresser ses quêtes de race qu'avec les données
@@ -86,10 +87,19 @@ const reportMatch = async (req: Request, res: Response): Promise<void> => {
 			cardsPlayedByRace: opponentReport.cards_played_by_race ?? undefined,
 			deckRaces: opponentReport.deck_races ?? undefined,
 		});
-		await progressWeeklyForMatch(userId, "ranked", winnerId === userId, { cardsPlayedByRace });
+		await progressWeeklyForMatch(userId, "ranked", winnerId === userId, { cardsPlayedByRace, deckRaces });
 		await progressWeeklyForMatch(opponentId, "ranked", winnerId === opponentId, {
 			cardsPlayedByRace: opponentReport.cards_played_by_race ?? undefined,
+			deckRaces: opponentReport.deck_races ?? undefined,
 		});
+		await progressUniqueForMatch(userId, "ranked", winnerId === userId, { deckRaces });
+		await progressUniqueForMatch(opponentId, "ranked", winnerId === opponentId, {
+			deckRaces: opponentReport.deck_races ?? undefined,
+		});
+		// ratingA/ratingB = MMR post-match de userId/opponentId respectivement
+		// (confirmMatch(clientMatchId, userId, opponentId, ...) → player1=userId).
+		await progressForRankTier(userId, ratingA);
+		await progressForRankTier(opponentId, ratingB);
 		res.status(200).json({ status: "confirmed", reward, balance: await getBalance(userId) });
 	} catch (error) {
 		console.error(error);

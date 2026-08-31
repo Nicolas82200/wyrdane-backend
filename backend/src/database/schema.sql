@@ -7,6 +7,7 @@ DROP TABLE IF EXISTS decks;
 DROP TABLE IF EXISTS user_cards;
 DROP TABLE IF EXISTS daily_quests;
 DROP TABLE IF EXISTS weekly_quests;
+DROP TABLE IF EXISTS unique_quests;
 DROP TABLE IF EXISTS referrals;
 DROP TABLE IF EXISTS login_rewards;
 DROP TABLE IF EXISTS match_reports;
@@ -221,11 +222,12 @@ CREATE TABLE daily_quests (
   UNIQUE KEY unique_user_quest_date_slot (user_id, quest_date, slot)
 );
 
--- Assignation/progression des 3 quêtes hebdomadaires d'un joueur, même
--- principe que daily_quests (contenu en code, WEEKLY_QUEST_TEMPLATES) mais
--- reset chaque lundi et récompense en packs (reward_pack) plutôt qu'en or.
--- week_start = lundi de la semaine courante (calculé côté SQL via WEEKDAY(),
--- jamais côté JS, pour rester cohérent quel que soit le fuseau du serveur).
+-- Assignation/progression de la quête hebdomadaire d'un joueur (1 slot),
+-- même principe que daily_quests (contenu en code, WEEKLY_QUEST_TEMPLATES)
+-- mais reset chaque lundi et récompense en packs (reward_pack) plutôt qu'en
+-- or. week_start = lundi de la semaine courante (calculé côté SQL via
+-- WEEKDAY(), jamais côté JS, pour rester cohérent quel que soit le fuseau du
+-- serveur).
 CREATE TABLE weekly_quests (
   id INT AUTO_INCREMENT PRIMARY KEY,
   user_id INT NOT NULL,
@@ -239,6 +241,27 @@ CREATE TABLE weekly_quests (
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
   UNIQUE KEY unique_user_quest_week_slot (user_id, week_start, slot)
+);
+
+-- Quêtes uniques (one-shot) : contrairement à daily_quests/weekly_quests,
+-- une seule ligne par joueur/quest_code, jamais reset, assignée une fois
+-- pour toutes (voir uniqueQuestModel.ensureUniqueQuests) puis toujours
+-- renvoyée en entier (pas de notion de slot/rotation). meta stocke un état
+-- additionnel propre à certains objectifs (ex. liste des races déjà
+-- gagnantes pour win_all_races) — NULL pour les autres.
+CREATE TABLE unique_quests (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  user_id INT NOT NULL,
+  quest_code VARCHAR(40) NOT NULL,
+  progress INT NOT NULL DEFAULT 0,
+  target INT NOT NULL,
+  reward_currency INT NOT NULL DEFAULT 0,
+  reward_pack INT NOT NULL DEFAULT 0,
+  meta VARCHAR(100) NULL,
+  claimed_at TIMESTAMP NULL DEFAULT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  UNIQUE KEY unique_user_quest_code (user_id, quest_code)
 );
 
 -- Parrainage à sens unique : un joueur ne peut parrainer qu'UN SEUL ami

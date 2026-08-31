@@ -44,22 +44,22 @@ const templateRow = (overrides: Partial<Record<string, unknown>> = {}) => ({
 describe("ensureTodayQuests", () => {
 	beforeEach(() => vi.clearAllMocks());
 
-	it("upserts 3 quests then returns them for the day", async () => {
+	it("upserts 2 quests then returns them for the day", async () => {
 		mockedDb.query.mockResolvedValue([{}]);
-		mockedDb.query.mockResolvedValueOnce([{}]).mockResolvedValueOnce([{}]).mockResolvedValueOnce([{}]).mockResolvedValueOnce([
-			[templateRow({ slot: 0 }), templateRow({ id: 2, slot: 1 }), templateRow({ id: 3, slot: 2 })],
+		mockedDb.query.mockResolvedValueOnce([{}]).mockResolvedValueOnce([{}]).mockResolvedValueOnce([
+			[templateRow({ slot: 0 }), templateRow({ id: 2, slot: 1 })],
 		]);
 
 		const rows = await ensureTodayQuests(1);
 
-		// 3 upserts (ON DUPLICATE KEY UPDATE) + 1 SELECT
-		expect(mockedDb.query).toHaveBeenCalledTimes(4);
+		// 2 upserts (ON DUPLICATE KEY UPDATE) + 1 SELECT
+		expect(mockedDb.query).toHaveBeenCalledTimes(3);
 		expect(mockedDb.query).toHaveBeenNthCalledWith(
 			1,
 			expect.stringContaining("ON DUPLICATE KEY UPDATE"),
 			[1, 0, expect.any(String), expect.any(Number), expect.any(Number)],
 		);
-		expect(rows).toHaveLength(3);
+		expect(rows).toHaveLength(2);
 	});
 });
 
@@ -68,7 +68,7 @@ describe("getDailyQuests", () => {
 
 	it("maps rows to the client-facing shape, including claimed status", async () => {
 		mockedDb.query.mockResolvedValue([{}]);
-		mockedDb.query.mockResolvedValueOnce([{}]).mockResolvedValueOnce([{}]).mockResolvedValueOnce([{}]).mockResolvedValueOnce([
+		mockedDb.query.mockResolvedValueOnce([{}]).mockResolvedValueOnce([{}]).mockResolvedValueOnce([
 			[templateRow({ progress: 1, claimed_at: null }), templateRow({ id: 2, claimed_at: "2026-08-17T10:00:00Z" })],
 		]);
 
@@ -85,12 +85,11 @@ describe("getDailyQuests", () => {
 describe("progressForMatch", () => {
 	beforeEach(() => vi.clearAllMocks());
 
-	// ensureTodayQuests fait 3 upserts (un par slot) puis 1 SELECT avant que
-	// progressForMatch n'examine les résultats — on doit mettre en file les 3
+	// ensureTodayQuests fait 2 upserts (un par slot) puis 1 SELECT avant que
+	// progressForMatch n'examine les résultats — on doit mettre en file les 2
 	// réponses d'upsert (peu importe leur contenu) avant la ligne du SELECT.
 	const queueEnsureTodayQuests = (rows: unknown[]) => {
 		mockedDb.query
-			.mockResolvedValueOnce([{}])
 			.mockResolvedValueOnce([{}])
 			.mockResolvedValueOnce([{}])
 			.mockResolvedValueOnce([rows]);
