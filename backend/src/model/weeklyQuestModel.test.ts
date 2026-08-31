@@ -44,22 +44,20 @@ const templateRow = (overrides: Partial<Record<string, unknown>> = {}) => ({
 describe("ensureThisWeekQuests", () => {
 	beforeEach(() => vi.clearAllMocks());
 
-	it("upserts 3 quests then returns them for the week", async () => {
+	it("upserts 1 quest then returns it for the week", async () => {
 		mockedDb.query.mockResolvedValue([{}]);
-		mockedDb.query.mockResolvedValueOnce([{}]).mockResolvedValueOnce([{}]).mockResolvedValueOnce([{}]).mockResolvedValueOnce([
-			[templateRow({ slot: 0 }), templateRow({ id: 2, slot: 1 }), templateRow({ id: 3, slot: 2 })],
-		]);
+		mockedDb.query.mockResolvedValueOnce([{}]).mockResolvedValueOnce([[templateRow({ slot: 0 })]]);
 
 		const rows = await ensureThisWeekQuests(1);
 
-		// 3 upserts (ON DUPLICATE KEY UPDATE) + 1 SELECT
-		expect(mockedDb.query).toHaveBeenCalledTimes(4);
+		// 1 upsert (ON DUPLICATE KEY UPDATE) + 1 SELECT
+		expect(mockedDb.query).toHaveBeenCalledTimes(2);
 		expect(mockedDb.query).toHaveBeenNthCalledWith(
 			1,
 			expect.stringContaining("ON DUPLICATE KEY UPDATE"),
 			[1, 0, expect.any(String), expect.any(Number), expect.any(Number)],
 		);
-		expect(rows).toHaveLength(3);
+		expect(rows).toHaveLength(1);
 	});
 });
 
@@ -68,7 +66,7 @@ describe("getWeeklyQuests", () => {
 
 	it("maps rows to the client-facing shape, including claimed status", async () => {
 		mockedDb.query.mockResolvedValue([{}]);
-		mockedDb.query.mockResolvedValueOnce([{}]).mockResolvedValueOnce([{}]).mockResolvedValueOnce([{}]).mockResolvedValueOnce([
+		mockedDb.query.mockResolvedValueOnce([{}]).mockResolvedValueOnce([
 			[templateRow({ progress: 1, claimed_at: null }), templateRow({ id: 2, claimed_at: "2026-08-24T10:00:00Z" })],
 		]);
 
@@ -86,11 +84,7 @@ describe("progressForMatch", () => {
 	beforeEach(() => vi.clearAllMocks());
 
 	const queueEnsureThisWeekQuests = (rows: unknown[]) => {
-		mockedDb.query
-			.mockResolvedValueOnce([{}])
-			.mockResolvedValueOnce([{}])
-			.mockResolvedValueOnce([{}])
-			.mockResolvedValueOnce([rows]);
+		mockedDb.query.mockResolvedValueOnce([{}]).mockResolvedValueOnce([rows]);
 	};
 
 	it("increments a 'play' quest regardless of mode or outcome", async () => {

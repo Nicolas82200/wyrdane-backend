@@ -14,11 +14,15 @@ vi.mock("../model/questModel", () => ({
 vi.mock("../model/weeklyQuestModel", () => ({
 	progressForMatch: vi.fn(),
 }));
+vi.mock("../model/uniqueQuestModel", () => ({
+	progressForMatch: vi.fn(),
+}));
 
 import { credit, getBalance } from "../model/currencyModel";
 import { incrementResult } from "../model/soloStatsModel";
 import { progressForMatch } from "../model/questModel";
 import { progressForMatch as progressWeeklyForMatch } from "../model/weeklyQuestModel";
+import { progressForMatch as progressUniqueForMatch } from "../model/uniqueQuestModel";
 import { reportSoloMatch } from "./rewardsController";
 
 const mocked = {
@@ -27,6 +31,7 @@ const mocked = {
 	incrementResult: incrementResult as ReturnType<typeof vi.fn>,
 	progressForMatch: progressForMatch as ReturnType<typeof vi.fn>,
 	progressWeeklyForMatch: progressWeeklyForMatch as ReturnType<typeof vi.fn>,
+	progressUniqueForMatch: progressUniqueForMatch as ReturnType<typeof vi.fn>,
 };
 
 const mockRes = (): Response => {

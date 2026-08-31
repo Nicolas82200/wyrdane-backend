@@ -50,7 +50,7 @@ const QUEST_TEMPLATES: QuestTemplate[] = [
 	...raceQuestTemplates(),
 ];
 
-const QUESTS_PER_DAY = 3;
+const QUESTS_PER_DAY = 2;
 
 interface DailyQuestRow extends RowDataPacket {
 	id: number;

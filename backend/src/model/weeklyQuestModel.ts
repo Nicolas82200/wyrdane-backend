@@ -13,7 +13,7 @@ import { creditFreePacks, getFreePacks } from "./currencyModel";
 // honnêtement d'un match réseau non classé avec les données actuelles.
 interface WeeklyQuestTemplate {
 	code: string;
-	objective: "play" | "win_network" | "play_race";
+	objective: "play" | "win_network" | "play_race" | "play_multirace";
 	target: number;
 	rewardPack: number;
 	descriptionKey: string;
@@ -37,10 +37,17 @@ const raceQuestTemplates = (): WeeklyQuestTemplate[] =>
 const WEEKLY_QUEST_TEMPLATES: WeeklyQuestTemplate[] = [
 	{ code: "play_30", objective: "play", target: 30, rewardPack: 1, descriptionKey: "QUEST_WEEKLY_PLAY_30" },
 	{ code: "win_network_10", objective: "win_network", target: 10, rewardPack: 2, descriptionKey: "QUEST_WEEKLY_WIN_NETWORK_10" },
+	{
+		code: "play_multirace_10",
+		objective: "play_multirace",
+		target: 10,
+		rewardPack: 2,
+		descriptionKey: "QUEST_WEEKLY_PLAY_MULTIRACE_10",
+	},
 	...raceQuestTemplates(),
 ];
 
-const QUESTS_PER_WEEK = 3;
+const QUESTS_PER_WEEK = 1;
 
 interface WeeklyQuestRow extends RowDataPacket {
 	id: number;
@@ -151,6 +158,9 @@ const getWeeklyQuests = async (userId: number): Promise<WeeklyQuestsResponse> =>
 
 interface MatchRaceData {
 	cardsPlayedByRace?: Record<string, number>;
+	// Races présentes dans le deck utilisé pour ce match — alimente
+	// play_multirace, peu importe le résultat.
+	deckRaces?: string[];
 }
 
 // Fait progresser les quêtes hebdo actives concernées par ce résultat de
@@ -176,6 +186,9 @@ const progressForMatch = async (
 			const count = raceData.cardsPlayedByRace?.[template.race] ?? 0;
 			if (count <= 0) continue;
 			await db.query("UPDATE weekly_quests SET progress = LEAST(progress + ?, target) WHERE id = ?", [count, quest.id]);
+		} else if (template.objective === "play_multirace") {
+			if ((raceData.deckRaces?.length ?? 0) < 2) continue;
+			await db.query("UPDATE weekly_quests SET progress = LEAST(progress + 1, target) WHERE id = ?", [quest.id]);
 		}
 	}
 };
