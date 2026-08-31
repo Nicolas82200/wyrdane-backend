@@ -19,7 +19,7 @@ class InsufficientFreePacksError extends Error {
 // Accordé explicitement à la création du compte (voir
 // userModel.createWithSteamAccount) ; les comptes créés avant l'ajout de ce
 // bonus le reçoivent séparément via claimStarterBonus, plus bas.
-const STARTER_CURRENCY = 1000;
+const STARTER_CURRENCY = 250;
 
 // Quête cachée : 500 or accordés à la toute première connexion Steam d'un
 // compte (jeu ou site, peu importe lequel des deux clients déclenche l'appel
