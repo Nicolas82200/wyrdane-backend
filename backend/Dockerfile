@@ -21,6 +21,12 @@ COPY package*.json ./
 RUN npm ci --omit=dev
 
 COPY --from=builder /app/dist ./dist
+# tsc ne copie que les .ts compilés : schema.sql/schema_sync.sql/cards_data.sql
+# sont lus au runtime via __dirname par migrate.ts/sync.ts (db:migrate/db:sync,
+# voir leurs commentaires) mais n'existaient jusqu'ici que dans l'image de
+# build, jamais dans l'image de prod réellement déployée — ces deux commandes
+# échouaient silencieusement (ENOENT) en conteneur.
+COPY --from=builder /app/src/database/*.sql ./dist/database/
 # Le dossier public (assets servis directement par Express) - à garder si présent
 COPY public ./public
 

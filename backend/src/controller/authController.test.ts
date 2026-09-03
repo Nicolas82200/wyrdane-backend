@@ -3,6 +3,7 @@ import type { Request, Response } from "express";
 
 vi.mock("../helper/steamHelper", () => ({
 	authenticateSteamTicket: vi.fn(),
+	fetchSteamPersonaName: vi.fn().mockResolvedValue(null),
 }));
 vi.mock("../helper/steamOpenIdHelper", () => ({
 	buildAuthUrl: vi.fn(() => "https://steamcommunity.com/openid/login?mock=1"),
@@ -11,25 +12,32 @@ vi.mock("../helper/steamOpenIdHelper", () => ({
 vi.mock("../model/userModel", () => ({
 	findBySteamId: vi.fn(),
 	createWithSteamAccount: vi.fn(),
+	updateUsername: vi.fn().mockResolvedValue(undefined),
+	ensureAdminFromEnv: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock("../model/collectionModel", () => ({
 	grantAllCards: vi.fn(),
+}));
+vi.mock("../model/analyticsModel", () => ({
+	recordLogin: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock("../helper/jwtHelper", () => ({
 	encodeJWT: vi.fn(() => "signed.jwt.token"),
 }));
 
-import { authenticateSteamTicket } from "../helper/steamHelper";
+import { authenticateSteamTicket, fetchSteamPersonaName } from "../helper/steamHelper";
 import { verifyAssertion } from "../helper/steamOpenIdHelper";
-import { findBySteamId, createWithSteamAccount } from "../model/userModel";
+import { findBySteamId, createWithSteamAccount, updateUsername } from "../model/userModel";
 import { grantAllCards } from "../model/collectionModel";
 import { steamLogin, steamOpenIdCallback, logout, authVerif } from "./authController";
 
 const mocked = {
 	authenticateSteamTicket: authenticateSteamTicket as ReturnType<typeof vi.fn>,
+	fetchSteamPersonaName: fetchSteamPersonaName as ReturnType<typeof vi.fn>,
 	verifyAssertion: verifyAssertion as ReturnType<typeof vi.fn>,
 	findBySteamId: findBySteamId as ReturnType<typeof vi.fn>,
 	createWithSteamAccount: createWithSteamAccount as ReturnType<typeof vi.fn>,
+	updateUsername: updateUsername as ReturnType<typeof vi.fn>,
 	grantAllCards: grantAllCards as ReturnType<typeof vi.fn>,
 };
 
@@ -41,6 +49,7 @@ const mockRes = (): Response => {
 	res.clearCookie = vi.fn().mockReturnValue(res);
 	res.redirect = vi.fn().mockReturnValue(res);
 	res.sendStatus = vi.fn().mockReturnValue(res);
+	res.send = vi.fn().mockReturnValue(res);
 	return res;
 };
 
@@ -167,6 +176,31 @@ describe("steamOpenIdCallback", () => {
 		await steamOpenIdCallback(req, res);
 
 		expect(res.redirect).toHaveBeenCalledWith("https://wyrdane.example");
+	});
+
+	it("sends a postMessage/close page instead of redirecting when popup=1 and the assertion succeeds", async () => {
+		process.env.FRONTEND_URL = "https://wyrdane.example";
+		mocked.verifyAssertion.mockResolvedValue("76561198000000001");
+		mocked.findBySteamId.mockResolvedValue([{ id: 1, username: "X" }]);
+		const req = { query: { popup: "1" } } as unknown as Request;
+		const res = mockRes();
+
+		await steamOpenIdCallback(req, res);
+
+		expect(res.redirect).not.toHaveBeenCalled();
+		expect(res.send).toHaveBeenCalledWith(expect.stringContaining("wyrdane-steam-login"));
+		expect(res.send).toHaveBeenCalledWith(expect.stringContaining("success\":true"));
+	});
+
+	it("sends a postMessage/close page reporting failure when popup=1 and the assertion is invalid", async () => {
+		mocked.verifyAssertion.mockResolvedValue(null);
+		const req = { query: { popup: "1" } } as unknown as Request;
+		const res = mockRes();
+
+		await steamOpenIdCallback(req, res);
+
+		expect(res.status).not.toHaveBeenCalledWith(401);
+		expect(res.send).toHaveBeenCalledWith(expect.stringContaining("success\":false"));
 	});
 });
 

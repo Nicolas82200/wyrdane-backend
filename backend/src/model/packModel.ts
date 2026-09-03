@@ -1,7 +1,9 @@
 import type { RowDataPacket } from "mysql2";
+import type { PoolConnection } from "mysql2/promise";
 import db from "./db";
 import { grantCard, getOwnedQuantity, MAX_COPIES_PER_CARD, DUST_VALUE_BY_RARITY } from "./collectionModel";
-import { credit, debit, getBalance } from "./currencyModel";
+import { credit, debit, debitFreePack, getBalance, getFreePacks } from "./currencyModel";
+import { progressForPackOpen } from "./uniqueQuestModel";
 
 import type { Cards } from "../types";
 
@@ -54,14 +56,41 @@ const drawWeightedCards = (pool: DrawableCardRow[], count: number): DrawableCard
 	return draws;
 };
 
-// Débite le coût, tire CARDS_PER_PACK cartes pondérées par rareté et les
-// octroie au joueur, le tout en transaction (même pattern que
-// rankedModel.confirmMatch : débit/octroi ne doivent jamais être partiels).
-// `free` saute le débit (route dev /open-free, gardée par DEV_FREE_PACKS).
-//
-// Un exemplaire qui porterait la quantité possédée au-delà de
-// MAX_COPIES_PER_CARD (déjà possédé, ou doublon au sein du même pack) n'est
-// pas octroyé : il est converti en or (DUST_VALUE_BY_RARITY).
+// Tire CARDS_PER_PACK cartes pondérées par rareté et les octroie au joueur
+// (partagé par openPack/openOwnedPack, appelé après que l'appelant a débité
+// le coût dans la même transaction — un exemplaire qui porterait la quantité
+// possédée au-delà de MAX_COPIES_PER_CARD, déjà possédé ou doublon au sein du
+// même pack, n'est pas octroyé : il est converti en or).
+const drawAndGrantCards = async (
+	userId: number,
+	pool: DrawableCardRow[],
+	connection: PoolConnection,
+): Promise<DrawResult[]> => {
+	const drawn = drawWeightedCards(pool, CARDS_PER_PACK);
+	const pendingQuantities = new Map<number, number>();
+	const results: DrawResult[] = [];
+	for (const card of drawn) {
+		const alreadyOwned = await getOwnedQuantity(userId, card.id);
+		const pending = pendingQuantities.get(card.id) ?? 0;
+		const projectedQuantity = alreadyOwned + pending;
+
+		if (projectedQuantity >= MAX_COPIES_PER_CARD) {
+			const goldEarned = DUST_VALUE_BY_RARITY[card.rarity] ?? 0;
+			await credit(userId, goldEarned, "pack_duplicate_dust", String(card.id), connection);
+			results.push({ ...card, dusted: true, goldEarned });
+		} else {
+			await grantCard(userId, card.id, 1, connection);
+			pendingQuantities.set(card.id, pending + 1);
+			results.push({ ...card, dusted: false, goldEarned: 0 });
+		}
+	}
+	return results;
+};
+
+// Débite le coût, tire et octroie les cartes, le tout en transaction (même
+// pattern que rankedModel.confirmMatch : débit/octroi ne doivent jamais être
+// partiels). `free` saute le débit (route dev /open-free, gardée par
+// DEV_FREE_PACKS).
 const openPack = async (userId: number, free = false): Promise<{ cards: DrawResult[]; balance: number }> => {
 	const pool = await fetchDrawablePool();
 	if (pool.length === 0) throw new Error("Aucune carte disponible pour un pack");
@@ -74,27 +103,11 @@ const openPack = async (userId: number, free = false): Promise<{ cards: DrawResu
 			await debit(userId, PACK_COST, "pack_open", undefined, connection);
 		}
 
-		const drawn = drawWeightedCards(pool, CARDS_PER_PACK);
-		const pendingQuantities = new Map<number, number>();
-		const results: DrawResult[] = [];
-		for (const card of drawn) {
-			const alreadyOwned = await getOwnedQuantity(userId, card.id);
-			const pending = pendingQuantities.get(card.id) ?? 0;
-			const projectedQuantity = alreadyOwned + pending;
-
-			if (projectedQuantity >= MAX_COPIES_PER_CARD) {
-				const goldEarned = DUST_VALUE_BY_RARITY[card.rarity] ?? 0;
-				await credit(userId, goldEarned, "pack_duplicate_dust", String(card.id), connection);
-				results.push({ ...card, dusted: true, goldEarned });
-			} else {
-				await grantCard(userId, card.id, 1, connection);
-				pendingQuantities.set(card.id, pending + 1);
-				results.push({ ...card, dusted: false, goldEarned: 0 });
-			}
-		}
+		const results = await drawAndGrantCards(userId, pool, connection);
 
 		await connection.commit();
 		const balance = await getBalance(userId);
+		await progressForPackOpen(userId);
 		return { cards: results, balance };
 	} catch (error) {
 		await connection.rollback();
@@ -104,4 +117,29 @@ const openPack = async (userId: number, free = false): Promise<{ cards: DrawResu
 	}
 };
 
-export { PACK_COST, CARDS_PER_PACK, RARITY_WEIGHTS, openPack };
+// Ouvre un pack en consommant le solde de packs gratuits (quêtes hebdo,
+// parrainage — voir weeklyQuestModel/referralModel) plutôt que l'or ; mêmes
+// probabilités de tirage que openPack, seule la source de débit change.
+const openOwnedPack = async (userId: number): Promise<{ cards: DrawResult[]; free_packs: number }> => {
+	const pool = await fetchDrawablePool();
+	if (pool.length === 0) throw new Error("Aucune carte disponible pour un pack");
+
+	const connection = await db.getConnection();
+	try {
+		await connection.beginTransaction();
+
+		await debitFreePack(userId, connection);
+		const results = await drawAndGrantCards(userId, pool, connection);
+
+		await connection.commit();
+		await progressForPackOpen(userId);
+		return { cards: results, free_packs: await getFreePacks(userId) };
+	} catch (error) {
+		await connection.rollback();
+		throw error;
+	} finally {
+		connection.release();
+	}
+};
+
+export { PACK_COST, CARDS_PER_PACK, RARITY_WEIGHTS, openPack, openOwnedPack };

@@ -9,10 +9,22 @@ class InsufficientFundsError extends Error {
 	}
 }
 
+class InsufficientFreePacksError extends Error {
+	constructor() {
+		super("Aucun pack gratuit disponible");
+		this.name = "InsufficientFreePacksError";
+	}
+}
+
 // Accordé explicitement à la création du compte (voir
 // userModel.createWithSteamAccount) ; les comptes créés avant l'ajout de ce
 // bonus le reçoivent séparément via claimStarterBonus, plus bas.
-const STARTER_CURRENCY = 1000;
+const STARTER_CURRENCY = 250;
+
+// Quête cachée : 500 or accordés à la toute première connexion Steam d'un
+// compte (jeu ou site, peu importe lequel des deux clients déclenche l'appel
+// en premier — voir claimFirstLoginReward, idempotent).
+const FIRST_LOGIN_REWARD = 500;
 
 const getBalance = async (userId: number): Promise<number> => {
 	const [rows] = await db.query<(RowDataPacket & { soft_currency: number })[]>(
@@ -66,6 +78,51 @@ const debit = async (
 	);
 };
 
+// Solde de packs gratuits (quêtes hebdomadaires, parrainage — voir
+// weeklyQuestModel/referralModel), distinct de soft_currency. Pas de ledger
+// dédié comme currency_ledger : une seule source de valeur pour l'instant,
+// pas besoin d'audit fin.
+const getFreePacks = async (userId: number): Promise<number> => {
+	const [rows] = await db.query<(RowDataPacket & { free_packs: number })[]>(
+		"SELECT free_packs FROM users WHERE id = ?",
+		[userId],
+	);
+	return rows[0]?.free_packs ?? 0;
+};
+
+const creditFreePacks = async (userId: number, amount: number, connection?: PoolConnection): Promise<void> => {
+	const runner: Pool | PoolConnection = connection ?? db;
+	await runner.query("UPDATE users SET free_packs = free_packs + ? WHERE id = ?", [amount, userId]);
+};
+
+// Débite un seul pack gratuit (verrouille la ligne si appelé dans une
+// transaction fournie, même garde-fou anti-double-clic que debit()).
+const debitFreePack = async (userId: number, connection?: PoolConnection): Promise<void> => {
+	const runner: Pool | PoolConnection = connection ?? db;
+	const [rows] = await runner.query<(RowDataPacket & { free_packs: number })[]>(
+		connection ? "SELECT free_packs FROM users WHERE id = ? FOR UPDATE" : "SELECT free_packs FROM users WHERE id = ?",
+		[userId],
+	);
+	const freePacks = rows[0]?.free_packs ?? 0;
+	if (freePacks < 1) throw new InsufficientFreePacksError();
+
+	await runner.query("UPDATE users SET free_packs = free_packs - 1 WHERE id = ?", [userId]);
+};
+
+// Montant total crédité/débité à un joueur pour une référence donnée (ex. un
+// client_match_id ranked) : sert à retrouver après coup le montant exact
+// crédité par confirmMatch sur un rapport de match rejoué une fois déjà
+// confirmé (voir rankedController.reportMatch, branche "existingMatch") sans
+// avoir à recalculer un barème qui peut dépendre d'un état déjà muté (série
+// de victoires) entretemps.
+const getCreditedAmountForReference = async (userId: number, reference: string): Promise<number> => {
+	const [rows] = await db.query<(RowDataPacket & { amount: number })[]>(
+		"SELECT COALESCE(SUM(amount), 0) AS amount FROM currency_ledger WHERE user_id = ? AND reference = ?",
+		[userId, reference],
+	);
+	return Number(rows[0]?.amount ?? 0);
+};
+
 // Nombre de mouvements positifs déjà journalisés aujourd'hui pour une raison
 // donnée (ex. 'match_win_solo') : base du plafond quotidien anti-farming.
 const countReasonToday = async (userId: number, reason: string): Promise<number> => {
@@ -115,12 +172,58 @@ const claimStarterBonus = async (userId: number): Promise<{ credited: boolean; b
 	return { credited: true, balance: await getBalance(userId) };
 };
 
+// Voir POST /api/currency/claim-first-login-bonus. Idempotent comme
+// claimStarterBonus : un second appel (autre client, retry réseau) est un
+// no-op (credited: false).
+const hasClaimedFirstLoginReward = async (userId: number): Promise<boolean> => {
+	const [rows] = await db.query<(RowDataPacket & { first_login_reward_claimed_at: string | null })[]>(
+		"SELECT first_login_reward_claimed_at FROM users WHERE id = ?",
+		[userId],
+	);
+	return rows.length > 0 && rows[0].first_login_reward_claimed_at !== null;
+};
+
+const markFirstLoginRewardClaimed = async (userId: number, connection?: PoolConnection): Promise<void> => {
+	const runner: Pool | PoolConnection = connection ?? db;
+	await runner.query("UPDATE users SET first_login_reward_claimed_at = NOW() WHERE id = ?", [userId]);
+};
+
+const claimFirstLoginReward = async (
+	userId: number,
+): Promise<{ credited: boolean; balance: number; amount: number }> => {
+	if (await hasClaimedFirstLoginReward(userId)) {
+		return { credited: false, balance: await getBalance(userId), amount: FIRST_LOGIN_REWARD };
+	}
+
+	const connection = await db.getConnection();
+	try {
+		await connection.beginTransaction();
+		await credit(userId, FIRST_LOGIN_REWARD, "first_login_reward", undefined, connection);
+		await markFirstLoginRewardClaimed(userId, connection);
+		await connection.commit();
+	} catch (error) {
+		await connection.rollback();
+		throw error;
+	} finally {
+		connection.release();
+	}
+
+	return { credited: true, balance: await getBalance(userId), amount: FIRST_LOGIN_REWARD };
+};
+
 export {
 	InsufficientFundsError,
+	InsufficientFreePacksError,
 	STARTER_CURRENCY,
+	FIRST_LOGIN_REWARD,
 	getBalance,
 	credit,
 	debit,
+	getFreePacks,
+	creditFreePacks,
+	debitFreePack,
+	getCreditedAmountForReference,
 	countReasonToday,
 	claimStarterBonus,
+	claimFirstLoginReward,
 };

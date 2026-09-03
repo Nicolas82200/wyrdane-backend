@@ -1,22 +1,17 @@
 import { Request, Response } from "express";
 
-import { credit, getBalance, countReasonToday } from "../model/currencyModel";
+import { getBalance } from "../model/currencyModel";
 import { incrementResult } from "../model/soloStatsModel";
+import { progressForMatch } from "../model/questModel";
+import { progressForMatch as progressWeeklyForMatch } from "../model/weeklyQuestModel";
+import { progressForMatch as progressUniqueForMatch } from "../model/uniqueQuestModel";
 import { getUserId } from "../helper/requestUser";
 
-const SOLO_WIN_REWARD = 25;
-const SOLO_WIN_DAILY_CAP = 5;
-const SOLO_WIN_REASON = "match_win_solo";
-
-const SOLO_DEFEAT_REWARD = 10;
-const SOLO_DEFEAT_DAILY_CAP = 5;
-const SOLO_DEFEAT_REASON = "match_loss_solo";
-
 // Un match solo/vs IA n'a pas de second client pour contredire un rapport
-// menteur (contrairement au flux ranked, à double rapport) : la récompense
-// est donc plus faible et plafonnée par jour plutôt que non bornée. Une
-// défaite rapporte aussi (moins qu'une victoire) pour garder la boucle de
-// jeu motivante même en cas de série perdante, plafonnée séparément.
+// menteur (contrairement au flux ranked, à double rapport) : aucune monnaie
+// n'y est donc plus créditée depuis 2026-08-26 (l'or ne récompense que les
+// matchs classés confirmés, voir rankedModel.confirmMatch) — seuls les
+// stats (solo_stats) et les quêtes progressent encore ici.
 const reportSoloMatch = async (req: Request, res: Response): Promise<void> => {
 	try {
 		const userId = getUserId(req);
@@ -25,26 +20,23 @@ const reportSoloMatch = async (req: Request, res: Response): Promise<void> => {
 			return;
 		}
 
-		const { result } = req.body as { result?: "victory" | "defeat" };
+		const { result, cardsPlayedByRace, deckRaces } = req.body as {
+			result?: "victory" | "defeat";
+			cardsPlayedByRace?: Record<string, number>;
+			deckRaces?: string[];
+		};
 		if (result !== "victory" && result !== "defeat") {
 			res.status(400).json({ message: "Payload invalide" });
 			return;
 		}
 
-		const reward = result === "victory" ? SOLO_WIN_REWARD : SOLO_DEFEAT_REWARD;
-		const dailyCap = result === "victory" ? SOLO_WIN_DAILY_CAP : SOLO_DEFEAT_DAILY_CAP;
-		const reason = result === "victory" ? SOLO_WIN_REASON : SOLO_DEFEAT_REASON;
+		const won = result === "victory";
+		const winStreak = await incrementResult(userId, won);
+		await progressForMatch(userId, "solo", won, { cardsPlayedByRace, deckRaces });
+		await progressWeeklyForMatch(userId, "solo", won, { cardsPlayedByRace, deckRaces });
+		await progressUniqueForMatch(userId, "solo", won, { deckRaces });
 
-		await incrementResult(userId, result === "victory");
-
-		const alreadyToday = await countReasonToday(userId, reason);
-		if (alreadyToday >= dailyCap) {
-			res.status(200).json({ credited: false, balance: await getBalance(userId) });
-			return;
-		}
-
-		await credit(userId, reward, reason);
-		res.status(200).json({ credited: true, balance: await getBalance(userId) });
+		res.status(200).json({ credited: false, reward: 0, winStreak, balance: await getBalance(userId) });
 	} catch (error) {
 		console.error(error);
 		res.status(500).json({ message: "Server error" });

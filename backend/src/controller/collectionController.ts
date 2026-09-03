@@ -5,6 +5,7 @@ import { findByUserId, grantCard, findIdsByName, buyCard as buyCardModel, CardNo
 import { InsufficientFundsError } from "../model/currencyModel";
 import { create as createDeck, replaceCards } from "../model/decksModel";
 import { hasClaimedStarter, markStarterClaimed } from "../model/userModel";
+import { completeReferralIfPending } from "../model/referralModel";
 import { STARTER_DECKS } from "../data/starterDecks";
 import { getUserId } from "../helper/requestUser";
 
@@ -69,6 +70,11 @@ const claimStarter = async (req: Request, res: Response): Promise<void> => {
 			}
 
 			await markStarterClaimed(userId, connection);
+			// Si ce joueur a été parrainé, son parrain est crédité maintenant
+			// (voir referralModel.completeReferralIfPending) : le tutoriel qui
+			// vient de se terminer est le déclencheur de la récompense de
+			// parrainage, dans la même transaction que le reste de claim-starter.
+			await completeReferralIfPending(userId, connection);
 			await connection.commit();
 		} catch (error) {
 			await connection.rollback();
