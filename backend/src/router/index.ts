@@ -15,6 +15,7 @@ import profileRouter from "./profileRouter";
 import questRouter from "./questRouter";
 import rankedRouter from "./rankedRouter";
 import referralRouter from "./referralRouter";
+import reportsRouter from "./reportsRouter";
 import rewardsRouter from "./rewardsRouter";
 import shopRouter from "./shopRouter";
 import userRouter from "./userRouter";
@@ -37,6 +38,7 @@ router.use("/profile", authorization, profileRouter);
 router.use("/quests", authorization, questRouter);
 router.use("/ranked", authorization, rankedRouter);
 router.use("/referral", authorization, referralRouter);
+router.use("/reports", authorization, reportsRouter);
 router.use("/rewards", authorization, rewardsRouter);
 router.use("/shop", authorization, shopRouter);
 
