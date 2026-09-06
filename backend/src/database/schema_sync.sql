@@ -76,6 +76,22 @@ CREATE TABLE IF NOT EXISTS ranked_stats (
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS matchmaking_tickets (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  ticket_id VARCHAR(36) NOT NULL,
+  user_id INT NOT NULL,
+  mmr INT NOT NULL,
+  status VARCHAR(20) NOT NULL DEFAULT 'waiting',
+  opponent_id INT NULL,
+  role VARCHAR(10) NULL,
+  steam_lobby_id BIGINT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  UNIQUE KEY unique_ticket_id (ticket_id),
+  UNIQUE KEY unique_user_ticket (user_id),
+  INDEX idx_matchmaking_status (status)
+);
+
 CREATE TABLE IF NOT EXISTS solo_stats (
   user_id INT PRIMARY KEY,
   wins INT NOT NULL DEFAULT 0,
