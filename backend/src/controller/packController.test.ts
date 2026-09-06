@@ -5,12 +5,17 @@ vi.mock("../model/packModel", () => ({
 	openPack: vi.fn(),
 	PACK_COST: 500,
 }));
+vi.mock("../model/uniqueQuestModel", () => ({
+	progressForPackOpen: vi.fn(),
+}));
 
 import { openPack } from "../model/packModel";
+import { progressForPackOpen } from "../model/uniqueQuestModel";
 import { InsufficientFundsError } from "../model/currencyModel";
 import { openPackHandler, openFreePackHandler } from "./packController";
 
 const mockedOpenPack = openPack as ReturnType<typeof vi.fn>;
+const mockedProgressForPackOpen = progressForPackOpen as ReturnType<typeof vi.fn>;
 
 const mockRes = (): Response => {
 	const res = {} as Response;
@@ -48,6 +53,16 @@ describe("openPackHandler", () => {
 		await openPackHandler(req, res);
 
 		expect(mockedOpenPack).toHaveBeenCalledWith(1, false);
+	});
+
+	it("progresses the open_packs unique quest with the number of cards drawn", async () => {
+		mockedOpenPack.mockResolvedValue({ cards: [{}, {}, {}], balance: 500 });
+		const req = { user: { id: 1 } } as unknown as Request;
+		const res = mockRes();
+
+		await openPackHandler(req, res);
+
+		expect(mockedProgressForPackOpen).toHaveBeenCalledWith(1, 3);
 	});
 });
 

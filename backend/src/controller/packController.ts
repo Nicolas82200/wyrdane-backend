@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 
 import { openPack, openOwnedPack, PACK_COST } from "../model/packModel";
 import { InsufficientFundsError, InsufficientFreePacksError } from "../model/currencyModel";
+import { progressForPackOpen } from "../model/uniqueQuestModel";
 import { getUserId } from "../helper/requestUser";
 
 const handleOpenPack = async (req: Request, res: Response, free: boolean): Promise<void> => {
@@ -13,6 +14,7 @@ const handleOpenPack = async (req: Request, res: Response, free: boolean): Promi
 		}
 
 		const { cards, balance } = await openPack(userId, free);
+		await progressForPackOpen(userId, cards.length);
 		res.status(200).json({ cards, balance });
 	} catch (error) {
 		if (error instanceof InsufficientFundsError) {
@@ -49,6 +51,7 @@ const openOwnedPackHandler = async (req: Request, res: Response): Promise<void> 
 		}
 
 		const { cards, free_packs } = await openOwnedPack(userId);
+		await progressForPackOpen(userId, cards.length);
 		res.status(200).json({ cards, free_packs });
 	} catch (error) {
 		if (error instanceof InsufficientFreePacksError) {
