@@ -137,6 +137,29 @@ CREATE TABLE ranked_stats (
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
+-- File d'attente de matchmaking classé (appariement par MMR) : un ticket par
+-- joueur actif, remplacé (pas dupliqué) à chaque nouvel appel à la file grâce
+-- à UNIQUE KEY sur user_id. status : waiting -> matched -> (steam_lobby_id
+-- renseigné une fois l'hôte connu) ; ou waiting -> cancelled/expired. role et
+-- opponent_id ne sont renseignés qu'une fois status = matched. steam_lobby_id
+-- en BIGINT (SteamID de lobby 64 bits), NULL tant que l'hôte n'a pas encore
+-- appelé report-lobby — voir matchmakingModel.ts.
+CREATE TABLE matchmaking_tickets (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  ticket_id VARCHAR(36) NOT NULL,
+  user_id INT NOT NULL,
+  mmr INT NOT NULL,
+  status VARCHAR(20) NOT NULL DEFAULT 'waiting',
+  opponent_id INT NULL,
+  role VARCHAR(10) NULL,
+  steam_lobby_id BIGINT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  UNIQUE KEY unique_ticket_id (ticket_id),
+  UNIQUE KEY unique_user_ticket (user_id),
+  INDEX idx_matchmaking_status (status)
+);
+
 -- Compteur de parties solo/vs IA (distinct de ranked_stats, pas de MMR ici) :
 -- alimenté par POST /api/rewards/solo-match, indépendamment du plafond
 -- quotidien de la récompense en monnaie (les stats comptent toujours).
