@@ -136,9 +136,15 @@ const findMissing = async (
 	);
 };
 
-const getOwnedQuantity = async (userId: number, cardId: number): Promise<number> => {
-	const [rows] = await db.query<(RowDataPacket & { quantity: number })[]>(
-		"SELECT quantity FROM user_cards WHERE user_id = ? AND card_id = ?",
+// `connection` optionnelle : verrouille la ligne (FOR UPDATE) quand appelée
+// dans la transaction de buyCard/packModel.drawAndGrantCards, pour qu'un achat
+// ou un tirage concurrent sur la même carte sérialise sur ce verrou au lieu de
+// tous deux lire la même quantité avant qu'aucun n'ait commité (ce qui ferait
+// dépasser MAX_COPIES_PER_CARD).
+const getOwnedQuantity = async (userId: number, cardId: number, connection?: PoolConnection): Promise<number> => {
+	const runner = connection ?? db;
+	const [rows] = await runner.query<(RowDataPacket & { quantity: number })[]>(
+		`SELECT quantity FROM user_cards WHERE user_id = ? AND card_id = ?${connection ? " FOR UPDATE" : ""}`,
 		[userId, cardId],
 	);
 	return rows[0]?.quantity ?? 0;
@@ -160,12 +166,12 @@ const buyCard = async (userId: number, cardId: number): Promise<{ balance: numbe
 	const price = CARD_PRICE_BY_RARITY[card.rarity ?? ""];
 	if (!price) throw new CardNotPurchasableError();
 
-	const alreadyOwned = await getOwnedQuantity(userId, cardId);
-	if (alreadyOwned >= MAX_COPIES_PER_CARD) throw new CardNotPurchasableError();
-
 	const connection = await db.getConnection();
 	try {
 		await connection.beginTransaction();
+
+		const alreadyOwned = await getOwnedQuantity(userId, cardId, connection);
+		if (alreadyOwned >= MAX_COPIES_PER_CARD) throw new CardNotPurchasableError();
 
 		await debit(userId, price, "card_buy", String(cardId), connection);
 		await grantCard(userId, cardId, 1, connection);

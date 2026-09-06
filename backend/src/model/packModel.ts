@@ -70,7 +70,7 @@ const drawAndGrantCards = async (
 	const pendingQuantities = new Map<number, number>();
 	const results: DrawResult[] = [];
 	for (const card of drawn) {
-		const alreadyOwned = await getOwnedQuantity(userId, card.id);
+		const alreadyOwned = await getOwnedQuantity(userId, card.id, connection);
 		const pending = pendingQuantities.get(card.id) ?? 0;
 		const projectedQuantity = alreadyOwned + pending;
 
@@ -107,7 +107,15 @@ const openPack = async (userId: number, free = false): Promise<{ cards: DrawResu
 
 		await connection.commit();
 		const balance = await getBalance(userId);
-		await progressForPackOpen(userId);
+		// Volontairement HORS du try/catch transactionnel : la transaction est déjà
+		// commitée (l'or a déjà été débité, les cartes déjà octroyées) — une erreur
+		// ici ne doit ni déclencher un rollback (no-op sur une transaction commitée)
+		// ni faire échouer la réponse au client, qui a bien reçu son pack.
+		try {
+			await progressForPackOpen(userId);
+		} catch (error) {
+			console.error("openPack: échec de la progression de quête après commit", error);
+		}
 		return { cards: results, balance };
 	} catch (error) {
 		await connection.rollback();
@@ -132,7 +140,12 @@ const openOwnedPack = async (userId: number): Promise<{ cards: DrawResult[]; fre
 		const results = await drawAndGrantCards(userId, pool, connection);
 
 		await connection.commit();
-		await progressForPackOpen(userId);
+		// Voir openPack ci-dessus : hors du try/catch transactionnel, même raison.
+		try {
+			await progressForPackOpen(userId);
+		} catch (error) {
+			console.error("openOwnedPack: échec de la progression de quête après commit", error);
+		}
 		return { cards: results, free_packs: await getFreePacks(userId) };
 	} catch (error) {
 		await connection.rollback();

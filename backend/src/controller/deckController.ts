@@ -76,7 +76,18 @@ const save = async (req: Request, res: Response): Promise<void> => {
 			entries: { cardId: number; quantity: number }[];
 		};
 
-		if (!name || !Array.isArray(entries)) {
+		// MAX_ENTRIES_PER_DECK largement au-dessus de ACH_MEGA_DECK (>100 cartes
+		// jouables) : borne défensive contre un payload de taille absurde, pas une
+		// vraie règle de deckbuilding (celle-ci vient de MAX_COPIES_PER_CARD et de
+		// findMissing/cardTypes plus bas).
+		const MAX_ENTRIES_PER_DECK = 300;
+		const entriesAreWellFormed =
+			Array.isArray(entries) &&
+			entries.length <= MAX_ENTRIES_PER_DECK &&
+			entries.every(
+				(e) => e && typeof e.cardId === "number" && typeof e.quantity === "number" && e.quantity > 0,
+			);
+		if (!name || !entriesAreWellFormed) {
 			res.status(400).json({ message: "Payload invalide" });
 			return;
 		}

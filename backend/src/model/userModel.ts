@@ -63,10 +63,15 @@ const createWithSteamAccount = async (
 
 // Voir POST /api/collection/claim-starter : empêche de regrant/recréer les
 // decks de départ si le joueur (ou le client, en cas de retry réseau) rappelle
-// la route après une première réclamation réussie.
-const hasClaimedStarter = async (userId: number): Promise<boolean> => {
-	const [rows] = await db.query<(RowDataPacket & { starter_claimed_at: string | null })[]>(
-		"SELECT starter_claimed_at FROM `users` WHERE id = ?",
+// la route après une première réclamation réussie. `connection` optionnelle :
+// verrouille la ligne (FOR UPDATE) quand appelée DANS la transaction de
+// claimStarter, pour que deux appels concurrents sérialisent sur ce verrou au
+// lieu de tous les deux passer le contrôle avant qu'aucun n'ait commité (ce
+// qui dupliquerait cartes/decks de départ).
+const hasClaimedStarter = async (userId: number, connection?: PoolConnection): Promise<boolean> => {
+	const runner = connection ?? db;
+	const [rows] = await runner.query<(RowDataPacket & { starter_claimed_at: string | null })[]>(
+		`SELECT starter_claimed_at FROM \`users\` WHERE id = ?${connection ? " FOR UPDATE" : ""}`,
 		[userId],
 	);
 	return rows.length > 0 && rows[0].starter_claimed_at !== null;

@@ -38,6 +38,9 @@ const claimStarter = async (req: Request, res: Response): Promise<void> => {
 			return;
 		}
 
+		// Rejet rapide hors transaction (évite de préparer idsByName pour rien sur
+		// le cas courant d'un second appel) : le contrôle qui compte réellement
+		// contre une race est refait avec FOR UPDATE dans la transaction ci-dessous.
 		if (await hasClaimedStarter(userId)) {
 			res.status(200).json({ claimed: false, message: "Déjà réclamé" });
 			return;
@@ -55,6 +58,12 @@ const claimStarter = async (req: Request, res: Response): Promise<void> => {
 		const connection = await db.getConnection();
 		try {
 			await connection.beginTransaction();
+
+			if (await hasClaimedStarter(userId, connection)) {
+				await connection.commit();
+				res.status(200).json({ claimed: false, message: "Déjà réclamé" });
+				return;
+			}
 
 			for (const deck of STARTER_DECKS) {
 				for (const entry of deck.entries) {
