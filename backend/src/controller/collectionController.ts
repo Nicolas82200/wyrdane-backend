@@ -1,14 +1,13 @@
 import { Request, Response } from "express";
-import type { JwtPayload } from "jsonwebtoken";
 
-import { findByUserId } from "../model/collectionModel";
-
-const getUserId = (req: Request): number | null => {
-	const payload = req.user as JwtPayload | undefined;
-	if (!payload || typeof payload.id === "undefined") return null;
-	const id = Number(payload.id);
-	return Number.isNaN(id) ? null : id;
-};
+import db from "../model/db";
+import { findByUserId, grantCard, findIdsByName, buyCard as buyCardModel, CardNotPurchasableError } from "../model/collectionModel";
+import { InsufficientFundsError } from "../model/currencyModel";
+import { create as createDeck, replaceCards } from "../model/decksModel";
+import { hasClaimedStarter, markStarterClaimed } from "../model/userModel";
+import { completeReferralIfPending } from "../model/referralModel";
+import { STARTER_DECKS } from "../data/starterDecks";
+import { getUserId } from "../helper/requestUser";
 
 const getCollection = async (req: Request, res: Response): Promise<void> => {
 	try {
@@ -26,4 +25,108 @@ const getCollection = async (req: Request, res: Response): Promise<void> => {
 	}
 };
 
-export { getCollection };
+// Appelée par le client (TutorialManager.notify_victory) à la fin du tutoriel :
+// grante d'un coup la collection ET les 4 decks jouables des decks de départ
+// (un par race, voir data/starterDecks.ts), pour que le nouveau joueur retrouve
+// des decks complets dans "Mes Decks" sans étape manuelle. Idempotent : un
+// second appel (retry réseau...) ne regrant ni ne recrée rien.
+const claimStarter = async (req: Request, res: Response): Promise<void> => {
+	try {
+		const userId = getUserId(req);
+		if (!userId) {
+			res.status(401).json({ message: "Non authentifié" });
+			return;
+		}
+
+		// Rejet rapide hors transaction (évite de préparer idsByName pour rien sur
+		// le cas courant d'un second appel) : le contrôle qui compte réellement
+		// contre une race est refait avec FOR UPDATE dans la transaction ci-dessous.
+		if (await hasClaimedStarter(userId)) {
+			res.status(200).json({ claimed: false, message: "Déjà réclamé" });
+			return;
+		}
+
+		const allNames = STARTER_DECKS.flatMap((deck) => deck.entries.map((e) => e.name));
+		const idsByName = await findIdsByName(allNames);
+		const missing = allNames.filter((name) => !idsByName.has(name));
+		if (missing.length > 0) {
+			console.error("claim-starter: cartes introuvables en base :", missing);
+			res.status(500).json({ message: "Catalogue de cartes incomplet" });
+			return;
+		}
+
+		const connection = await db.getConnection();
+		try {
+			await connection.beginTransaction();
+
+			if (await hasClaimedStarter(userId, connection)) {
+				await connection.commit();
+				res.status(200).json({ claimed: false, message: "Déjà réclamé" });
+				return;
+			}
+
+			for (const deck of STARTER_DECKS) {
+				for (const entry of deck.entries) {
+					await grantCard(userId, idsByName.get(entry.name) as number, entry.quantity, connection);
+				}
+
+				const deckId = await createDeck(userId, deck.deckName, connection);
+				const cardEntries = deck.entries.map((entry) => ({
+					cardId: idsByName.get(entry.name) as number,
+					quantity: entry.quantity,
+				}));
+				await replaceCards(deckId, cardEntries, connection);
+			}
+
+			await markStarterClaimed(userId, connection);
+			// Si ce joueur a été parrainé, son parrain est crédité maintenant
+			// (voir referralModel.completeReferralIfPending) : le tutoriel qui
+			// vient de se terminer est le déclencheur de la récompense de
+			// parrainage, dans la même transaction que le reste de claim-starter.
+			await completeReferralIfPending(userId, connection);
+			await connection.commit();
+		} catch (error) {
+			await connection.rollback();
+			throw error;
+		} finally {
+			connection.release();
+		}
+
+		res.status(200).json({ claimed: true });
+	} catch (error) {
+		console.error(error);
+		res.status(500).json({ message: "Server error" });
+	}
+};
+
+const buyCard = async (req: Request, res: Response): Promise<void> => {
+	try {
+		const userId = getUserId(req);
+		if (!userId) {
+			res.status(401).json({ message: "Non authentifié" });
+			return;
+		}
+
+		const { cardId } = req.body as { cardId?: number };
+		if (typeof cardId !== "number") {
+			res.status(400).json({ message: "Payload invalide" });
+			return;
+		}
+
+		const { balance, quantity } = await buyCardModel(userId, cardId);
+		res.status(200).json({ balance, quantity });
+	} catch (error) {
+		if (error instanceof InsufficientFundsError) {
+			res.status(400).json({ message: error.message });
+			return;
+		}
+		if (error instanceof CardNotPurchasableError) {
+			res.status(400).json({ message: error.message });
+			return;
+		}
+		console.error(error);
+		res.status(500).json({ message: "Server error" });
+	}
+};
+
+export { getCollection, claimStarter, buyCard };

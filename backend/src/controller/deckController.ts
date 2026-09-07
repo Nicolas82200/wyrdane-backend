@@ -1,5 +1,4 @@
 import { Request, Response } from "express";
-import type { JwtPayload } from "jsonwebtoken";
 
 import {
 	findByUserId,
@@ -10,14 +9,8 @@ import {
 	replaceCards,
 	deleteDeck,
 } from "../model/decksModel";
-import { findMissing } from "../model/collectionModel";
-
-const getUserId = (req: Request): number | null => {
-	const payload = req.user as JwtPayload | undefined;
-	if (!payload || typeof payload.id === "undefined") return null;
-	const id = Number(payload.id);
-	return Number.isNaN(id) ? null : id;
-};
+import { findMissing, findCardTypes, MAX_COPIES_PER_CARD } from "../model/collectionModel";
+import { getUserId } from "../helper/requestUser";
 
 const getUserDecks = async (req: Request, res: Response): Promise<void> => {
 	try {
@@ -83,8 +76,33 @@ const save = async (req: Request, res: Response): Promise<void> => {
 			entries: { cardId: number; quantity: number }[];
 		};
 
-		if (!name || !Array.isArray(entries)) {
+		// MAX_ENTRIES_PER_DECK largement au-dessus de ACH_MEGA_DECK (>100 cartes
+		// jouables) : borne défensive contre un payload de taille absurde, pas une
+		// vraie règle de deckbuilding (celle-ci vient de MAX_COPIES_PER_CARD et de
+		// findMissing/cardTypes plus bas).
+		const MAX_ENTRIES_PER_DECK = 300;
+		const entriesAreWellFormed =
+			Array.isArray(entries) &&
+			entries.length <= MAX_ENTRIES_PER_DECK &&
+			entries.every(
+				(e) => e && typeof e.cardId === "number" && typeof e.quantity === "number" && e.quantity > 0,
+			);
+		if (!name || !entriesAreWellFormed) {
 			res.status(400).json({ message: "Payload invalide" });
+			return;
+		}
+
+		// Cartes-ressource exemptées : quantité illimitée dans un deck (voir
+		// README « Système de Ressources par Race » côté client).
+		const cardTypes = await findCardTypes(entries.map((e) => e.cardId));
+		const overLimit = entries.filter(
+			(e) => cardTypes.get(e.cardId) !== "Ressource" && e.quantity > MAX_COPIES_PER_CARD,
+		);
+		if (overLimit.length > 0) {
+			res.status(400).json({
+				message: `Maximum ${MAX_COPIES_PER_CARD} exemplaires par carte`,
+				overLimit,
+			});
 			return;
 		}
 

@@ -1,4 +1,5 @@
 import type { RowDataPacket, ResultSetHeader } from "mysql2";
+import type { PoolConnection } from "mysql2/promise";
 import db from "./db";
 
 import type { Decks } from "../types";
@@ -43,8 +44,13 @@ const findById = async (deckId: number): Promise<DeckRow | null> => {
 	return rows[0] ?? null;
 };
 
-const create = async (userId: number, name: string): Promise<number> => {
-	const [result] = await db.query<ResultSetHeader>(
+const create = async (
+	userId: number,
+	name: string,
+	connection?: PoolConnection,
+): Promise<number> => {
+	const runner = connection ?? db;
+	const [result] = await runner.query<ResultSetHeader>(
 		"INSERT INTO decks (user_id, name) VALUES (?, ?)",
 		[userId, name],
 	);
@@ -58,12 +64,14 @@ const updateName = async (deckId: number, name: string): Promise<void> => {
 const replaceCards = async (
 	deckId: number,
 	entries: { cardId: number; quantity: number }[],
+	connection?: PoolConnection,
 ): Promise<void> => {
-	await db.query("DELETE FROM deck_cards WHERE deck_id = ?", [deckId]);
+	const runner = connection ?? db;
+	await runner.query("DELETE FROM deck_cards WHERE deck_id = ?", [deckId]);
 	if (entries.length === 0) return;
 
 	const values = entries.map((e) => [deckId, e.cardId, e.quantity]);
-	await db.query(
+	await runner.query(
 		"INSERT INTO deck_cards (deck_id, card_id, quantity) VALUES ?",
 		[values],
 	);

@@ -7,7 +7,11 @@ API partagée du TCG **Wyrdane**, consommée par le client de jeu (Godot 4, mult
 - **Comptes joueurs** — authentification exclusivement via Steam (ticket de session vérifié côté serveur), pas de mot de passe
 - **Decks** — création/modification/suppression des decks, consultable et modifiable depuis le site web comme depuis le jeu
 - **Catalogue de cartes** — source de vérité des données de carte servies au site web
-- À venir : **classement (ranked)**, **collection de cartes** (déblocages persistants), **boutique de cosmétiques** (achats réels)
+- **Collection de cartes** — cartes possédées, monnaie molle, boutique de packs (ouverture pondérée par rareté)
+- **Classement (ranked)** — MMR Elo par double-report de match, leaderboard
+- **Boutique de cosmétiques** — achats réels via Steamworks Microtransactions
+- **Boucle de rétention** — quêtes quotidiennes, quêtes hebdomadaires, récompense de connexion quotidienne, parrainage (un seul filleul par joueur)
+- À venir : **matchmaking classé par MMR** (file d'attente, contrat dans `docs/backend-contracts/ranked-matchmaking-and-retention.md` côté `card-game` — routes pas encore implémentées côté backend)
 
 ## Stack
 
@@ -37,6 +41,12 @@ npm run dev
 ```
 
 Importer `backend/src/database/schema.sql` puis `cards_data.sql` dans la base MySQL avant le premier lancement.
+
+## Déploiement
+
+En prod, le backend tourne en **Docker Compose** (MySQL + API) sur un **VPS OVH** (`api.wyrdane.com`), derrière un reverse proxy Nginx en HTTPS (Let's Encrypt). Le site compagnon `wyrdane-website` est hébergé sur le même VPS.
+
+Le déploiement est **continu** : tout push sur `main` déclenche automatiquement (GitHub Actions) `git pull` + rebuild des conteneurs sur le serveur — aucune action manuelle nécessaire après un merge. Détails complets de l'infra (sécurité, CI/CD, structure des fichiers Docker) dans `CLAUDE.md`.
 
 ## Origine
 

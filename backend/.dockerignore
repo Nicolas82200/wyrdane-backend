@@ -1,0 +1,11 @@
+# /var/www/wyrdane-backend/backend/.dockerignore
+node_modules
+dist
+.env
+.env.*
+.git
+.gitignore
+*.log
+npm-debug.log*
+.vscode
+.DS_Store

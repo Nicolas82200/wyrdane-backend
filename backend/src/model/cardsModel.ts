@@ -9,4 +9,9 @@ const findAll = async (): Promise<CardsRow[]> => {
 	return rows;
 };
 
-export { findAll };
+const findById = async (id: number): Promise<CardsRow | null> => {
+	const [rows] = await db.query<CardsRow[]>("SELECT * FROM `cards` WHERE id = ?", [id]);
+	return rows[0] ?? null;
+};
+
+export { findAll, findById };

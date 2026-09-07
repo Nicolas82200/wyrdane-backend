@@ -1,7 +1,9 @@
 import { RowDataPacket, ResultSetHeader } from "mysql2";
+import type { PoolConnection } from "mysql2/promise";
 
 import db from "./db";
 import { User } from "../types";
+import { STARTER_CURRENCY } from "./currencyModel";
 
 interface UserRow extends User, RowDataPacket {}
 
@@ -35,9 +37,12 @@ const createWithSteamAccount = async (
 	try {
 		await connection.beginTransaction();
 
+		// Solde de départ accordé explicitement (plutôt que de compter sur le
+		// défaut de colonne, qui reste à 0) : les comptes créés avant l'ajout de
+		// ce bonus le reçoivent séparément via claimStarterBonus (voir plus bas).
 		const [userResult] = await connection.query<ResultSetHeader>(
-			"INSERT INTO `users` (username) VALUES (?)",
-			[username],
+			"INSERT INTO `users` (username, soft_currency) VALUES (?, ?)",
+			[username, STARTER_CURRENCY],
 		);
 		const userId = userResult.insertId;
 
@@ -56,4 +61,56 @@ const createWithSteamAccount = async (
 	}
 };
 
-export { findOne, findBySteamId, createWithSteamAccount };
+// Voir POST /api/collection/claim-starter : empêche de regrant/recréer les
+// decks de départ si le joueur (ou le client, en cas de retry réseau) rappelle
+// la route après une première réclamation réussie. `connection` optionnelle :
+// verrouille la ligne (FOR UPDATE) quand appelée DANS la transaction de
+// claimStarter, pour que deux appels concurrents sérialisent sur ce verrou au
+// lieu de tous les deux passer le contrôle avant qu'aucun n'ait commité (ce
+// qui dupliquerait cartes/decks de départ).
+const hasClaimedStarter = async (userId: number, connection?: PoolConnection): Promise<boolean> => {
+	const runner = connection ?? db;
+	const [rows] = await runner.query<(RowDataPacket & { starter_claimed_at: string | null })[]>(
+		`SELECT starter_claimed_at FROM \`users\` WHERE id = ?${connection ? " FOR UPDATE" : ""}`,
+		[userId],
+	);
+	return rows.length > 0 && rows[0].starter_claimed_at !== null;
+};
+
+const markStarterClaimed = async (userId: number, connection?: PoolConnection): Promise<void> => {
+	const runner = connection ?? db;
+	await runner.query("UPDATE `users` SET starter_claimed_at = NOW() WHERE id = ?", [userId]);
+};
+
+// Rafraîchit le pseudo affiché avec le "persona name" Steam courant (appelé
+// à chaque login, voir authController.loginWithSteamId) : reste à jour si le
+// joueur change son pseudo Steam, sans jamais bloquer la connexion si l'appel
+// à l'API Web Steam échoue (voir fetchSteamPersonaName).
+const updateUsername = async (userId: number, username: string): Promise<void> => {
+	await db.query("UPDATE `users` SET username = ? WHERE id = ?", [username, userId]);
+};
+
+// Auto-répare le rôle admin à chaque connexion pour les steamid listés dans
+// ADMIN_STEAM_IDS (env, liste séparée par des virgules) : volontairement PAS
+// stocké uniquement en base, pour survivre à un reset de la BDD (fait pour
+// tester) sans avoir à repasser par une requête SQL manuelle. Ne retire
+// jamais is_admin (retrait = édition manuelle en base ou via le dashboard).
+const ensureAdminFromEnv = async (userId: number, steamId: string): Promise<void> => {
+	const adminSteamIds = (process.env.ADMIN_STEAM_IDS ?? "")
+		.split(",")
+		.map((id) => id.trim())
+		.filter(Boolean);
+	if (!adminSteamIds.includes(steamId)) return;
+
+	await db.query("UPDATE `users` SET is_admin = TRUE WHERE id = ?", [userId]);
+};
+
+export {
+	findOne,
+	findBySteamId,
+	createWithSteamAccount,
+	updateUsername,
+	hasClaimedStarter,
+	markStarterClaimed,
+	ensureAdminFromEnv,
+};

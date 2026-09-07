@@ -1,12 +1,46 @@
 import type { RowDataPacket } from "mysql2";
 import type { PoolConnection } from "mysql2/promise";
 import db from "./db";
+import { findById as findCardById } from "./cardsModel";
+import { debit, getBalance } from "./currencyModel";
 
 import type { Cards } from "../types";
 interface UserCardRow extends Cards, RowDataPacket {
 	quantity: number;
 	unlocked_at: string;
 }
+
+class CardNotPurchasableError extends Error {
+	constructor() {
+		super("Cette carte n'est pas disponible à l'achat");
+		this.name = "CardNotPurchasableError";
+	}
+}
+
+// Doit rester synchronisé avec CurrencyManager.CARD_PRICE_BY_RARITY côté
+// client Godot (E:\card-game\scripts\collection\CurrencyManager.gd) — même
+// tarification, affichée là-bas à titre indicatif, appliquée et vérifiée ici.
+const CARD_PRICE_BY_RARITY: Record<string, number> = {
+	Commune: 100,
+	Rare: 150,
+	Épique: 200,
+	Légendaire: 250,
+};
+
+// Doit rester synchronisé avec DeckBuilder.MAX_COPIES côté client Godot
+// (E:\card-game\scripts\deck\DeckBuilder.gd) et MAX_COPIES_PER_CARD dans
+// deckController.ts — plafond de copies utilisables d'une carte dans un deck.
+const MAX_COPIES_PER_CARD = 4;
+
+// Or reçu à la place d'un exemplaire de pack qui dépasserait
+// MAX_COPIES_PER_CARD (voir packModel.openPack) — même logique que la
+// destruction/dust d'un TCG classique, montants par rareté.
+const DUST_VALUE_BY_RARITY: Record<string, number> = {
+	Commune: 25,
+	Rare: 50,
+	Épique: 75,
+	Légendaire: 100,
+};
 
 const findByUserId = async (userId: number): Promise<UserCardRow[]> => {
 	const [rows] = await db.query<UserCardRow[]>(
@@ -38,17 +72,52 @@ const grantCard = async (
 	);
 };
 
+// 40 par carte : au-delà du max de copies d'un serviteur/sort (4) et large
+// pour les cartes-ressource, qui n'ont pas de plafond de copies dans un deck.
+const DEV_GRANT_QUANTITY = 40;
+
 const grantAllCards = async (userId: number): Promise<void> => {
 	await db.query(
 		`INSERT INTO user_cards (user_id, card_id, quantity)
-		 SELECT ?, id, 3 FROM cards
+		 SELECT ?, id, ? FROM cards
 		 ON DUPLICATE KEY UPDATE quantity = quantity`,
-		[userId],
+		[userId, DEV_GRANT_QUANTITY],
 	);
+};
+
+// Résout un lot de noms de cartes vers leurs id (voir POST
+// /api/collection/claim-starter, qui référence les cartes des decks de départ
+// par nom plutôt que par id pour rester lisible/maintenable côté code).
+const findIdsByName = async (
+	names: string[],
+	connection?: PoolConnection,
+): Promise<Map<string, number>> => {
+	if (names.length === 0) return new Map();
+	const runner = connection ?? db;
+	const [rows] = await runner.query<(RowDataPacket & { id: number; name: string })[]>(
+		"SELECT id, name FROM cards WHERE name IN (?)",
+		[names],
+	);
+	return new Map(rows.map((row) => [row.name, row.id]));
+};
+
+// Résout le card_type de chaque id demandé (utilisé pour exempter les
+// cartes-ressource des plafonds de possession/copies, voir findMissing et
+// deckController.save côté client Godot DeckManager/DeckBuilder).
+const findCardTypes = async (cardIds: number[]): Promise<Map<number, string>> => {
+	if (cardIds.length === 0) return new Map();
+	const [rows] = await db.query<(RowDataPacket & { id: number; card_type: string })[]>(
+		"SELECT id, card_type FROM cards WHERE id IN (?)",
+		[cardIds],
+	);
+	return new Map(rows.map((row) => [row.id, row.card_type]));
 };
 
 // Vérifie que le joueur possède au moins la quantité demandée pour chaque
 // entrée. Renvoie la liste des entrées en défaut (vide si tout est possédé).
+// Les cartes-ressource sont exemptées : quantité illimitée dans un deck, sans
+// lien avec ce qui est possédé en collection (voir README « Système de
+// Ressources par Race » côté client).
 const findMissing = async (
 	userId: number,
 	entries: { cardId: number; quantity: number }[],
@@ -60,8 +129,79 @@ const findMissing = async (
 		[userId, entries.map((e) => e.cardId)],
 	);
 	const owned = new Map(rows.map((row) => [row.card_id, row.quantity]));
+	const cardTypes = await findCardTypes(entries.map((e) => e.cardId));
 
-	return entries.filter((e) => (owned.get(e.cardId) ?? 0) < e.quantity);
+	return entries.filter(
+		(e) => cardTypes.get(e.cardId) !== "Ressource" && (owned.get(e.cardId) ?? 0) < e.quantity,
+	);
 };
 
-export { findByUserId, grantCard, grantAllCards, findMissing };
+// `connection` optionnelle : verrouille la ligne (FOR UPDATE) quand appelée
+// dans la transaction de buyCard/packModel.drawAndGrantCards, pour qu'un achat
+// ou un tirage concurrent sur la même carte sérialise sur ce verrou au lieu de
+// tous deux lire la même quantité avant qu'aucun n'ait commité (ce qui ferait
+// dépasser MAX_COPIES_PER_CARD).
+const getOwnedQuantity = async (userId: number, cardId: number, connection?: PoolConnection): Promise<number> => {
+	const runner = connection ?? db;
+	const [rows] = await runner.query<(RowDataPacket & { quantity: number })[]>(
+		`SELECT quantity FROM user_cards WHERE user_id = ? AND card_id = ?${connection ? " FOR UPDATE" : ""}`,
+		[userId, cardId],
+	);
+	return rows[0]?.quantity ?? 0;
+};
+
+// Achat d'une carte à l'unité (boutique du deckbuilder) : débite le prix fixé
+// par rareté et octroie un exemplaire, en transaction (même pattern que
+// packModel.openPack). Les cartes-ressource sont exclues, comme du pool de
+// tirage des packs (fetchDrawablePool) : ce ne sont pas de vraies récompenses
+// de collection.
+const buyCard = async (userId: number, cardId: number): Promise<{ balance: number; quantity: number }> => {
+	const card = await findCardById(cardId);
+	if (!card) throw new CardNotPurchasableError();
+	// card_type est déclaré `number` dans l'interface Cards (types.ts) alors que
+	// la colonne SQL est un VARCHAR — cast défensif, sans toucher ce type
+	// partagé qui déborde du périmètre de cette feature.
+	if (String(card.card_type) === "Ressource") throw new CardNotPurchasableError();
+
+	const price = CARD_PRICE_BY_RARITY[card.rarity ?? ""];
+	if (!price) throw new CardNotPurchasableError();
+
+	const connection = await db.getConnection();
+	try {
+		await connection.beginTransaction();
+
+		const alreadyOwned = await getOwnedQuantity(userId, cardId, connection);
+		if (alreadyOwned >= MAX_COPIES_PER_CARD) throw new CardNotPurchasableError();
+
+		await debit(userId, price, "card_buy", String(cardId), connection);
+		await grantCard(userId, cardId, 1, connection);
+
+		await connection.commit();
+	} catch (error) {
+		await connection.rollback();
+		throw error;
+	} finally {
+		connection.release();
+	}
+
+	const [balance, quantity] = await Promise.all([
+		getBalance(userId),
+		getOwnedQuantity(userId, cardId),
+	]);
+	return { balance, quantity };
+};
+
+export {
+	findByUserId,
+	grantCard,
+	grantAllCards,
+	findIdsByName,
+	findMissing,
+	findCardTypes,
+	getOwnedQuantity,
+	buyCard,
+	CardNotPurchasableError,
+	CARD_PRICE_BY_RARITY,
+	MAX_COPIES_PER_CARD,
+	DUST_VALUE_BY_RARITY,
+};
