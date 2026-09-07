@@ -189,20 +189,31 @@ describe("countReasonToday", () => {
 describe("claimStarterBonus", () => {
 	beforeEach(() => vi.clearAllMocks());
 
-	it("is a no-op when the bonus was already claimed", async () => {
-		mockedDb.query.mockResolvedValueOnce([[{ starter_currency_claimed_at: "2026-01-01" }]]);
+	it("is a no-op when the bonus was already claimed, checked with FOR UPDATE inside the transaction", async () => {
+		const connection = {
+			query: vi.fn().mockResolvedValueOnce([[{ starter_currency_claimed_at: "2026-01-01" }]]),
+			beginTransaction: vi.fn(),
+			commit: vi.fn(),
+			rollback: vi.fn(),
+			release: vi.fn(),
+		};
+		mockedDb.getConnection.mockResolvedValueOnce(connection);
 		mockedDb.query.mockResolvedValueOnce([[{ soft_currency: 1000 }]]);
 
 		const result = await claimStarterBonus(1);
 
 		expect(result).toEqual({ credited: false, balance: 1000 });
-		expect(mockedDb.getConnection).not.toHaveBeenCalled();
+		expect(connection.query).toHaveBeenCalledWith(expect.stringContaining("FOR UPDATE"), [1]);
+		expect(connection.commit).toHaveBeenCalledTimes(1);
+		expect(connection.rollback).not.toHaveBeenCalled();
+		expect(connection.release).toHaveBeenCalledTimes(1);
 	});
 
 	it("credits STARTER_CURRENCY and marks it claimed, in a committed transaction", async () => {
-		mockedDb.query.mockResolvedValueOnce([[{ starter_currency_claimed_at: null }]]);
 		const connection = {
-			query: vi.fn().mockResolvedValue([{}]),
+			query: vi.fn()
+				.mockResolvedValueOnce([[{ starter_currency_claimed_at: null }]])
+				.mockResolvedValue([{}]),
 			beginTransaction: vi.fn(),
 			commit: vi.fn(),
 			rollback: vi.fn(),
@@ -214,6 +225,7 @@ describe("claimStarterBonus", () => {
 		const result = await claimStarterBonus(1);
 
 		expect(connection.beginTransaction).toHaveBeenCalledTimes(1);
+		expect(connection.query).toHaveBeenCalledWith(expect.stringContaining("FOR UPDATE"), [1]);
 		expect(connection.query).toHaveBeenCalledWith(
 			expect.stringContaining("soft_currency = soft_currency + ?"),
 			[STARTER_CURRENCY, 1],
@@ -225,9 +237,10 @@ describe("claimStarterBonus", () => {
 	});
 
 	it("rolls back and rethrows if crediting fails mid-transaction", async () => {
-		mockedDb.query.mockResolvedValueOnce([[{ starter_currency_claimed_at: null }]]);
 		const connection = {
-			query: vi.fn().mockRejectedValue(new Error("db exploded")),
+			query: vi.fn()
+				.mockResolvedValueOnce([[{ starter_currency_claimed_at: null }]])
+				.mockRejectedValue(new Error("db exploded")),
 			beginTransaction: vi.fn(),
 			commit: vi.fn(),
 			rollback: vi.fn(),
@@ -246,20 +259,31 @@ describe("claimStarterBonus", () => {
 describe("claimFirstLoginReward", () => {
 	beforeEach(() => vi.clearAllMocks());
 
-	it("is a no-op when the hidden quest was already claimed", async () => {
-		mockedDb.query.mockResolvedValueOnce([[{ first_login_reward_claimed_at: "2026-01-01" }]]);
+	it("is a no-op when the hidden quest was already claimed, checked with FOR UPDATE inside the transaction", async () => {
+		const connection = {
+			query: vi.fn().mockResolvedValueOnce([[{ first_login_reward_claimed_at: "2026-01-01" }]]),
+			beginTransaction: vi.fn(),
+			commit: vi.fn(),
+			rollback: vi.fn(),
+			release: vi.fn(),
+		};
+		mockedDb.getConnection.mockResolvedValueOnce(connection);
 		mockedDb.query.mockResolvedValueOnce([[{ soft_currency: 1500 }]]);
 
 		const result = await claimFirstLoginReward(1);
 
 		expect(result).toEqual({ credited: false, balance: 1500, amount: FIRST_LOGIN_REWARD });
-		expect(mockedDb.getConnection).not.toHaveBeenCalled();
+		expect(connection.query).toHaveBeenCalledWith(expect.stringContaining("FOR UPDATE"), [1]);
+		expect(connection.commit).toHaveBeenCalledTimes(1);
+		expect(connection.rollback).not.toHaveBeenCalled();
+		expect(connection.release).toHaveBeenCalledTimes(1);
 	});
 
 	it("credits FIRST_LOGIN_REWARD and marks it claimed, in a committed transaction", async () => {
-		mockedDb.query.mockResolvedValueOnce([[{ first_login_reward_claimed_at: null }]]);
 		const connection = {
-			query: vi.fn().mockResolvedValue([{}]),
+			query: vi.fn()
+				.mockResolvedValueOnce([[{ first_login_reward_claimed_at: null }]])
+				.mockResolvedValue([{}]),
 			beginTransaction: vi.fn(),
 			commit: vi.fn(),
 			rollback: vi.fn(),
@@ -271,6 +295,7 @@ describe("claimFirstLoginReward", () => {
 		const result = await claimFirstLoginReward(1);
 
 		expect(connection.beginTransaction).toHaveBeenCalledTimes(1);
+		expect(connection.query).toHaveBeenCalledWith(expect.stringContaining("FOR UPDATE"), [1]);
 		expect(connection.query).toHaveBeenCalledWith(
 			expect.stringContaining("soft_currency = soft_currency + ?"),
 			[FIRST_LOGIN_REWARD, 1],
@@ -286,9 +311,10 @@ describe("claimFirstLoginReward", () => {
 	});
 
 	it("rolls back and rethrows if crediting fails mid-transaction", async () => {
-		mockedDb.query.mockResolvedValueOnce([[{ first_login_reward_claimed_at: null }]]);
 		const connection = {
-			query: vi.fn().mockRejectedValue(new Error("db exploded")),
+			query: vi.fn()
+				.mockResolvedValueOnce([[{ first_login_reward_claimed_at: null }]])
+				.mockRejectedValue(new Error("db exploded")),
 			beginTransaction: vi.fn(),
 			commit: vi.fn(),
 			rollback: vi.fn(),

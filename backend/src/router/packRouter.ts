@@ -1,11 +1,14 @@
 import { Router } from "express";
 
 import { openPackHandler, openFreePackHandler, openOwnedPackHandler } from "../controller/packController";
+import rateLimit from "../middleware/rateLimit";
 
 const router = Router();
 
-router.post("/open", openPackHandler);
-router.post("/open-free", openFreePackHandler);
-router.post("/open-owned", openOwnedPackHandler);
+const openLimit = rateLimit({ windowMs: 10 * 60 * 1000, max: 30, name: "packs:open" });
+
+router.post("/open", openLimit, openPackHandler);
+router.post("/open-free", openLimit, openFreePackHandler);
+router.post("/open-owned", openLimit, openOwnedPackHandler);
 
 export default router;

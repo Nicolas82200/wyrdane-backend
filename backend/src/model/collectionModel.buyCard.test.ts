@@ -49,17 +49,22 @@ describe("buyCard", () => {
 		await expect(buyCard(1, 10)).rejects.toThrow(CardNotPurchasableError);
 	});
 
-	it("rejects once the player already owns MAX_COPIES_PER_CARD copies", async () => {
+	it("rejects once the player already owns MAX_COPIES_PER_CARD copies, checked with FOR UPDATE inside the transaction", async () => {
 		mockedFindCardById.mockResolvedValue(commonCard);
-		mockedDb.query.mockResolvedValueOnce([[{ quantity: MAX_COPIES_PER_CARD }]]);
+		const connection = freshConnection();
+		connection.query.mockResolvedValueOnce([[{ quantity: MAX_COPIES_PER_CARD }]]);
+		mockedDb.getConnection.mockResolvedValueOnce(connection);
 
 		await expect(buyCard(1, 10)).rejects.toThrow(CardNotPurchasableError);
+		expect(connection.query).toHaveBeenCalledWith(expect.stringContaining("FOR UPDATE"), [1, 10]);
+		expect(connection.rollback).toHaveBeenCalledTimes(1);
+		expect(mockedDebit).not.toHaveBeenCalled();
 	});
 
 	it("propagates InsufficientFundsError and rolls back without granting the card", async () => {
 		mockedFindCardById.mockResolvedValue(commonCard);
-		mockedDb.query.mockResolvedValueOnce([[{ quantity: 0 }]]);
 		const connection = freshConnection();
+		connection.query.mockResolvedValueOnce([[{ quantity: 0 }]]);
 		mockedDb.getConnection.mockResolvedValueOnce(connection);
 		mockedDebit.mockRejectedValueOnce(new InsufficientFundsError());
 
@@ -70,13 +75,12 @@ describe("buyCard", () => {
 
 	it("debits the price, grants one copy and commits on a successful purchase", async () => {
 		mockedFindCardById.mockResolvedValue(commonCard);
-		mockedDb.query
-			.mockResolvedValueOnce([[{ quantity: 1 }]]) // getOwnedQuantity before purchase
-			.mockResolvedValueOnce([[{ quantity: 2 }]]); // getOwnedQuantity after purchase (grantCard runs on the transaction connection, not db)
 		const connection = freshConnection();
+		connection.query.mockResolvedValueOnce([[{ quantity: 1 }]]); // getOwnedQuantity FOR UPDATE, inside the transaction
 		mockedDb.getConnection.mockResolvedValueOnce(connection);
 		mockedDebit.mockResolvedValueOnce(undefined);
 		mockedGetBalance.mockResolvedValueOnce(400);
+		mockedDb.query.mockResolvedValueOnce([[{ quantity: 2 }]]); // getOwnedQuantity after purchase, outside the transaction
 
 		const result = await buyCard(1, 10);
 

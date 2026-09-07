@@ -6,6 +6,7 @@ import { progressForMatch } from "../model/questModel";
 import { progressForMatch as progressWeeklyForMatch } from "../model/weeklyQuestModel";
 import { progressForMatch as progressUniqueForMatch } from "../model/uniqueQuestModel";
 import { getUserId } from "../helper/requestUser";
+import { sanitizeCardsPlayedByRace, sanitizeDeckRaces } from "../helper/matchPayload";
 
 // Un match solo/vs IA n'a pas de second client pour contredire un rapport
 // menteur (contrairement au flux ranked, à double rapport) : aucune monnaie
@@ -20,17 +21,20 @@ const reportSoloMatch = async (req: Request, res: Response): Promise<void> => {
 			return;
 		}
 
-		const { result, cardsPlayedByRace, deckRaces } = req.body as {
+		const rawBody = req.body as {
 			result?: "victory" | "defeat";
 			cardsPlayedByRace?: Record<string, number>;
 			deckRaces?: string[];
 		};
-		if (result !== "victory" && result !== "defeat") {
+		if (rawBody.result !== "victory" && rawBody.result !== "defeat") {
 			res.status(400).json({ message: "Payload invalide" });
 			return;
 		}
 
-		const won = result === "victory";
+		const cardsPlayedByRace = sanitizeCardsPlayedByRace(rawBody.cardsPlayedByRace);
+		const deckRaces = sanitizeDeckRaces(rawBody.deckRaces);
+
+		const won = rawBody.result === "victory";
 		const winStreak = await incrementResult(userId, won);
 		await progressForMatch(userId, "solo", won, { cardsPlayedByRace, deckRaces });
 		await progressWeeklyForMatch(userId, "solo", won, { cardsPlayedByRace, deckRaces });

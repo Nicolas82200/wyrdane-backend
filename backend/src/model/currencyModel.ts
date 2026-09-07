@@ -134,53 +134,41 @@ const countReasonToday = async (userId: number, reason: string): Promise<number>
 	return rows[0]?.count ?? 0;
 };
 
-// Voir POST /api/currency/claim-starter-bonus : distinct de
-// userModel.hasClaimedStarter (cartes/decks de départ) — couvre les comptes
-// créés avant que createWithSteamAccount n'accorde STARTER_CURRENCY à la
-// création. Idempotent : un second appel est un no-op (credited: false).
-const hasClaimedStarterBonus = async (userId: number): Promise<boolean> => {
-	const [rows] = await db.query<(RowDataPacket & { starter_currency_claimed_at: string | null })[]>(
-		"SELECT starter_currency_claimed_at FROM users WHERE id = ?",
-		[userId],
-	);
-	return rows.length > 0 && rows[0].starter_currency_claimed_at !== null;
-};
-
 const markStarterBonusClaimed = async (userId: number, connection?: PoolConnection): Promise<void> => {
 	const runner: Pool | PoolConnection = connection ?? db;
 	await runner.query("UPDATE users SET starter_currency_claimed_at = NOW() WHERE id = ?", [userId]);
 };
 
+// Voir POST /api/currency/claim-starter-bonus : distinct de
+// userModel.hasClaimedStarter (cartes/decks de départ) — couvre les comptes
+// créés avant que createWithSteamAccount n'accorde STARTER_CURRENCY à la
+// création. Idempotent : un second appel est un no-op (credited: false).
+// Le "déjà réclamé ?" est vérifié avec FOR UPDATE DANS la transaction (et non
+// avant, via une lecture séparée) : deux appels concurrents (retry réseau,
+// double-clic) sérialisent sur le verrou de ligne au lieu de tous les deux
+// passer le contrôle avant qu'aucun n'ait commité, ce qui créditerait deux fois.
 const claimStarterBonus = async (userId: number): Promise<{ credited: boolean; balance: number }> => {
-	if (await hasClaimedStarterBonus(userId)) {
-		return { credited: false, balance: await getBalance(userId) };
-	}
-
 	const connection = await db.getConnection();
 	try {
 		await connection.beginTransaction();
+		const [rows] = await connection.query<(RowDataPacket & { starter_currency_claimed_at: string | null })[]>(
+			"SELECT starter_currency_claimed_at FROM users WHERE id = ? FOR UPDATE",
+			[userId],
+		);
+		if (rows.length > 0 && rows[0].starter_currency_claimed_at !== null) {
+			await connection.commit();
+			return { credited: false, balance: await getBalance(userId) };
+		}
 		await credit(userId, STARTER_CURRENCY, "starter_bonus", undefined, connection);
 		await markStarterBonusClaimed(userId, connection);
 		await connection.commit();
+		return { credited: true, balance: await getBalance(userId) };
 	} catch (error) {
 		await connection.rollback();
 		throw error;
 	} finally {
 		connection.release();
 	}
-
-	return { credited: true, balance: await getBalance(userId) };
-};
-
-// Voir POST /api/currency/claim-first-login-bonus. Idempotent comme
-// claimStarterBonus : un second appel (autre client, retry réseau) est un
-// no-op (credited: false).
-const hasClaimedFirstLoginReward = async (userId: number): Promise<boolean> => {
-	const [rows] = await db.query<(RowDataPacket & { first_login_reward_claimed_at: string | null })[]>(
-		"SELECT first_login_reward_claimed_at FROM users WHERE id = ?",
-		[userId],
-	);
-	return rows.length > 0 && rows[0].first_login_reward_claimed_at !== null;
 };
 
 const markFirstLoginRewardClaimed = async (userId: number, connection?: PoolConnection): Promise<void> => {
@@ -188,27 +176,34 @@ const markFirstLoginRewardClaimed = async (userId: number, connection?: PoolConn
 	await runner.query("UPDATE users SET first_login_reward_claimed_at = NOW() WHERE id = ?", [userId]);
 };
 
+// Voir POST /api/currency/claim-first-login-bonus. Idempotent comme
+// claimStarterBonus (même garde FOR UPDATE dans la transaction, pour la même
+// raison anti-double-crédit sur appels concurrents) : un second appel (autre
+// client, retry réseau) est un no-op (credited: false).
 const claimFirstLoginReward = async (
 	userId: number,
 ): Promise<{ credited: boolean; balance: number; amount: number }> => {
-	if (await hasClaimedFirstLoginReward(userId)) {
-		return { credited: false, balance: await getBalance(userId), amount: FIRST_LOGIN_REWARD };
-	}
-
 	const connection = await db.getConnection();
 	try {
 		await connection.beginTransaction();
+		const [rows] = await connection.query<(RowDataPacket & { first_login_reward_claimed_at: string | null })[]>(
+			"SELECT first_login_reward_claimed_at FROM users WHERE id = ? FOR UPDATE",
+			[userId],
+		);
+		if (rows.length > 0 && rows[0].first_login_reward_claimed_at !== null) {
+			await connection.commit();
+			return { credited: false, balance: await getBalance(userId), amount: FIRST_LOGIN_REWARD };
+		}
 		await credit(userId, FIRST_LOGIN_REWARD, "first_login_reward", undefined, connection);
 		await markFirstLoginRewardClaimed(userId, connection);
 		await connection.commit();
+		return { credited: true, balance: await getBalance(userId), amount: FIRST_LOGIN_REWARD };
 	} catch (error) {
 		await connection.rollback();
 		throw error;
 	} finally {
 		connection.release();
 	}
-
-	return { credited: true, balance: await getBalance(userId), amount: FIRST_LOGIN_REWARD };
 };
 
 export {

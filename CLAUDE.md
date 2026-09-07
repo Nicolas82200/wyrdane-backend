@@ -27,9 +27,8 @@ backend/
 │   ├── controller/        # authController (steamLogin/logout/authVerif), userController, cardController, deckController
 │   ├── model/              # Requêtes SQL (userModel, cardsModel, decksModel, db.ts = pool mysql2)
 │   ├── router/              # Montage des routes sous /api
-│   ├── middleware/         # auth.ts : vérifie le cookie JWT avant les routes protégées
-│   ├── helper/               # steamHelper (vérif ticket Steam), jwtHelper (encode/decode)
-│   ├── validator/            # Validation Joi des payloads (decks, cartes)
+│   ├── middleware/         # auth.ts (cookie JWT), csrf.ts (header requis sur les routes authentifiées), rateLimit.ts
+│   ├── helper/               # steamHelper (vérif ticket Steam), jwtHelper (encode/decode), matchPayload.ts (bornage cardsPlayedByRace/deckRaces déclarés par le client)
 │   └── database/            # schema.sql + cards_data.sql (seed des cartes)
 └── public/assets/card_art/  # Images des cartes servies statiquement
 ```

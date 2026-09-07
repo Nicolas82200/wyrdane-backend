@@ -8,6 +8,7 @@ import {
 	confirmMatch,
 	getLeaderboard,
 } from "../model/rankedModel";
+import { sanitizeCardsPlayedByRace, sanitizeDeckRaces } from "../helper/matchPayload";
 import { progressForMatch } from "../model/questModel";
 import { progressForMatch as progressWeeklyForMatch } from "../model/weeklyQuestModel";
 import { progressForMatch as progressUniqueForMatch, progressForRankTier } from "../model/uniqueQuestModel";
@@ -22,23 +23,33 @@ const reportMatch = async (req: Request, res: Response): Promise<void> => {
 			return;
 		}
 
-		const { clientMatchId, opponentId, winnerId, cardsPlayedByRace, deckRaces } = req.body as {
+		const rawBody = req.body as {
 			clientMatchId?: string;
 			opponentId?: number;
 			winnerId?: number;
 			cardsPlayedByRace?: Record<string, number>;
 			deckRaces?: string[];
 		};
+		const { clientMatchId, opponentId, winnerId } = rawBody;
 
 		if (
 			!clientMatchId ||
 			typeof opponentId !== "number" ||
 			typeof winnerId !== "number" ||
+			opponentId === userId ||
 			(winnerId !== userId && winnerId !== opponentId)
 		) {
 			res.status(400).json({ message: "Payload invalide" });
 			return;
 		}
+
+		// Bornage défensif : un client menteur ne peut de toute façon pas être
+		// empêché de déclarer un résultat fictif sans une preuve serveur qu'une
+		// vraie session P2P a eu lieu (voir le contrat de matchmaking classé) —
+		// mais au moins un payload absurde (compteur à 999999, race inexistante)
+		// ne peut plus fausser plusieurs quêtes/plusieurs races d'un coup.
+		const cardsPlayedByRace = sanitizeCardsPlayedByRace(rawBody.cardsPlayedByRace);
+		const deckRaces = sanitizeDeckRaces(rawBody.deckRaces);
 
 		const existingMatch = await findMatchHistory(clientMatchId);
 		if (existingMatch) {
