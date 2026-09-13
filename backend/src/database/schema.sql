@@ -153,6 +153,8 @@ CREATE TABLE matchmaking_tickets (
   opponent_id INT NULL,
   role VARCHAR(10) NULL,
   steam_lobby_id BIGINT NULL,
+  match_id VARCHAR(36) NULL,
+  match_session_token TEXT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
   UNIQUE KEY unique_ticket_id (ticket_id),

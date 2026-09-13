@@ -11,6 +11,13 @@ vi.mock("./rankedModel", () => ({
 	getStats: vi.fn(),
 }));
 
+// La génération réelle du jeton (JWT, TOKEN_SECRET) est testée séparément
+// dans helper/matchSessionToken.test.ts — ici on vérifie seulement que
+// pairTickets l'appelle et propage sa valeur aux deux tickets.
+vi.mock("../helper/matchSessionToken", () => ({
+	issueMatchSessionToken: vi.fn(() => "mock-session-token"),
+}));
+
 import db from "./db";
 import { getStats } from "./rankedModel";
 import { joinQueue, getQueueStatus, reportLobby, cancelQueue } from "./matchmakingModel";
@@ -27,6 +34,8 @@ interface TicketRow {
 	opponent_id: number | null;
 	role: string | null;
 	steam_lobby_id: string | null;
+	match_id: string | null;
+	match_session_token: string | null;
 	created_at: string;
 }
 
@@ -79,6 +88,8 @@ describe("matchmakingModel", () => {
 				opponent_id: null,
 				role: null,
 				steam_lobby_id: null,
+				match_id: null,
+				match_session_token: null,
 				created_at: NOW.toISOString(),
 			};
 			const connection = makeConnection(myTicket, []);
@@ -102,6 +113,8 @@ describe("matchmakingModel", () => {
 				opponent_id: null,
 				role: null,
 				steam_lobby_id: null,
+				match_id: null,
+				match_session_token: null,
 				created_at: NOW.toISOString(),
 			};
 			const opponent: TicketRow = {
@@ -113,6 +126,8 @@ describe("matchmakingModel", () => {
 				opponent_id: null,
 				role: null,
 				steam_lobby_id: null,
+				match_id: null,
+				match_session_token: null,
 				created_at: NOW.toISOString(),
 			};
 			const connection = makeConnection(myTicket, [opponent]);
@@ -120,11 +135,16 @@ describe("matchmakingModel", () => {
 
 			await joinQueue(5);
 
-			// user_id 2 est le plus petit des deux -> désigné hôte.
-			const myUpdate = findUpdate(connection, (sql, params) => sql.startsWith("UPDATE matchmaking_tickets SET status = 'matched'") && params[2] === 1);
-			const opponentUpdate = findUpdate(connection, (sql, params) => sql.startsWith("UPDATE matchmaking_tickets SET status = 'matched'") && params[2] === 2);
-			expect(myUpdate).toEqual([2, "guest", 1]);
-			expect(opponentUpdate).toEqual([5, "host", 2]);
+			// user_id 2 est le plus petit des deux -> désigné hôte. ticket.id est
+			// maintenant en dernière position (params[4]) : matchId/jeton de
+			// session (params[2]/params[3]) s'insèrent avant, voir pairTickets.
+			const myUpdate = findUpdate(connection, (sql, params) => sql.startsWith("UPDATE matchmaking_tickets SET status = 'matched'") && params[4] === 1);
+			const opponentUpdate = findUpdate(connection, (sql, params) => sql.startsWith("UPDATE matchmaking_tickets SET status = 'matched'") && params[4] === 2);
+			expect(myUpdate).toEqual([2, "guest", expect.any(String), "mock-session-token", 1]);
+			expect(opponentUpdate).toEqual([5, "host", expect.any(String), "mock-session-token", 2]);
+			// Les deux tickets appariés doivent partager exactement le même
+			// matchId (même appel à issueMatchSessionToken), pas un par ticket.
+			expect((myUpdate as unknown[])[2]).toEqual((opponentUpdate as unknown[])[2]);
 		});
 
 		it("does not pair with an opponent outside the MMR window", async () => {
@@ -138,6 +158,8 @@ describe("matchmakingModel", () => {
 				opponent_id: null,
 				role: null,
 				steam_lobby_id: null,
+				match_id: null,
+				match_session_token: null,
 				created_at: NOW.toISOString(),
 			};
 			const farOpponent: TicketRow = {
@@ -149,6 +171,8 @@ describe("matchmakingModel", () => {
 				opponent_id: null,
 				role: null,
 				steam_lobby_id: null,
+				match_id: null,
+				match_session_token: null,
 				created_at: NOW.toISOString(),
 			};
 			const connection = makeConnection(myTicket, [farOpponent]);
@@ -187,6 +211,8 @@ describe("matchmakingModel", () => {
 				opponent_id: null,
 				role: null,
 				steam_lobby_id: null,
+				match_id: null,
+				match_session_token: null,
 				created_at: NOW.toISOString(),
 			};
 			const connection = makeConnection(otherTicket, []);
@@ -207,6 +233,8 @@ describe("matchmakingModel", () => {
 				opponent_id: null,
 				role: null,
 				steam_lobby_id: null,
+				match_id: null,
+				match_session_token: null,
 				created_at: new Date(NOW.getTime() - 301_000).toISOString(),
 			};
 			const connection = makeConnection(oldTicket, []);
@@ -228,6 +256,8 @@ describe("matchmakingModel", () => {
 				opponent_id: 2,
 				role: "guest",
 				steam_lobby_id: "109775241000123456",
+				match_id: "match-abc",
+				match_session_token: "mock-session-token",
 				created_at: NOW.toISOString(),
 			};
 			const connection = makeConnection(matchedTicket, []);
@@ -240,6 +270,8 @@ describe("matchmakingModel", () => {
 				role: "guest",
 				opponent_id: 2,
 				steam_lobby_id: 109775241000123456,
+				match_id: "match-abc",
+				match_session_token: "mock-session-token",
 			});
 		});
 	});
@@ -255,6 +287,8 @@ describe("matchmakingModel", () => {
 				opponent_id: 2,
 				role: "guest",
 				steam_lobby_id: null,
+				match_id: null,
+				match_session_token: null,
 				created_at: NOW.toISOString(),
 			};
 			const connection = makeConnection(guestTicket, []);
@@ -276,6 +310,8 @@ describe("matchmakingModel", () => {
 				opponent_id: 2,
 				role: "host",
 				steam_lobby_id: null,
+				match_id: null,
+				match_session_token: null,
 				created_at: NOW.toISOString(),
 			};
 			const connection = makeConnection(hostTicket, []);

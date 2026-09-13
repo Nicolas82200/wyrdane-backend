@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Request, Response } from "express";
 
 vi.mock("../model/rankedModel", () => ({
@@ -36,6 +36,7 @@ import { progressForMatch } from "../model/questModel";
 import { progressForMatch as progressWeeklyForMatch } from "../model/weeklyQuestModel";
 import { progressForMatch as progressUniqueForMatch, progressForRankTier } from "../model/uniqueQuestModel";
 import { getBalance, getCreditedAmountForReference } from "../model/currencyModel";
+import { issueMatchSessionToken } from "../helper/matchSessionToken";
 import { reportMatch, getMyStats, getLeaderboardHandler } from "./rankedController";
 
 const mocked = {
@@ -123,6 +124,81 @@ describe("reportMatch", () => {
 
 		expect(res.status).toHaveBeenCalledWith(200);
 		expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ status: "confirmed", reward: 5 }));
+	});
+
+	describe("matchSessionToken (TODO.md P9 anti-cheat)", () => {
+		const originalSecret = process.env.TOKEN_SECRET;
+		const originalEnforce = process.env.ENFORCE_MATCH_SESSION_TOKEN;
+
+		beforeEach(() => {
+			process.env.TOKEN_SECRET = "test-secret";
+		});
+		afterEach(() => {
+			process.env.TOKEN_SECRET = originalSecret;
+			process.env.ENFORCE_MATCH_SESSION_TOKEN = originalEnforce;
+		});
+
+		it("soft mode (default): proceeds even without a token, missing report only logged", async () => {
+			delete process.env.ENFORCE_MATCH_SESSION_TOKEN;
+			mocked.findMatchHistory.mockResolvedValue(null);
+			mocked.findReport.mockResolvedValueOnce(null).mockResolvedValueOnce(null);
+			const req = reqAs(1, { clientMatchId: "m1", opponentId: 2, winnerId: 1 });
+			const res = mockRes();
+
+			await reportMatch(req, res);
+
+			expect(res.status).toHaveBeenCalledWith(202);
+			expect(mocked.createReport).toHaveBeenCalled();
+		});
+
+		it("enforce mode: rejects a report with no token", async () => {
+			process.env.ENFORCE_MATCH_SESSION_TOKEN = "true";
+			const req = reqAs(1, { clientMatchId: "m1", opponentId: 2, winnerId: 1 });
+			const res = mockRes();
+
+			await reportMatch(req, res);
+
+			expect(res.status).toHaveBeenCalledWith(400);
+			expect(mocked.createReport).not.toHaveBeenCalled();
+		});
+
+		it("enforce mode: rejects a token issued for a different pair of players", async () => {
+			process.env.ENFORCE_MATCH_SESSION_TOKEN = "true";
+			const token = issueMatchSessionToken("m1", 1, 999); // not opponentId=2
+			const req = reqAs(1, { clientMatchId: "m1", opponentId: 2, winnerId: 1, matchSessionToken: token });
+			const res = mockRes();
+
+			await reportMatch(req, res);
+
+			expect(res.status).toHaveBeenCalledWith(400);
+			expect(mocked.createReport).not.toHaveBeenCalled();
+		});
+
+		it("enforce mode: rejects a valid token whose matchId doesn't match the declared clientMatchId", async () => {
+			process.env.ENFORCE_MATCH_SESSION_TOKEN = "true";
+			const token = issueMatchSessionToken("m-other", 1, 2);
+			const req = reqAs(1, { clientMatchId: "m1", opponentId: 2, winnerId: 1, matchSessionToken: token });
+			const res = mockRes();
+
+			await reportMatch(req, res);
+
+			expect(res.status).toHaveBeenCalledWith(400);
+			expect(mocked.createReport).not.toHaveBeenCalled();
+		});
+
+		it("enforce mode: accepts a valid, matching token", async () => {
+			process.env.ENFORCE_MATCH_SESSION_TOKEN = "true";
+			const token = issueMatchSessionToken("m1", 1, 2);
+			mocked.findMatchHistory.mockResolvedValue(null);
+			mocked.findReport.mockResolvedValueOnce(null).mockResolvedValueOnce(null);
+			const req = reqAs(1, { clientMatchId: "m1", opponentId: 2, winnerId: 1, matchSessionToken: token });
+			const res = mockRes();
+
+			await reportMatch(req, res);
+
+			expect(res.status).toHaveBeenCalledWith(202);
+			expect(mocked.createReport).toHaveBeenCalled();
+		});
 	});
 
 	it("returns pending (not an error) on a retried report while the peer hasn't reported yet", async () => {

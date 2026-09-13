@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { PoolConnection, RowDataPacket } from "mysql2/promise";
 import db from "./db";
 import { getStats } from "./rankedModel";
+import { issueMatchSessionToken } from "../helper/matchSessionToken";
 
 // Fenêtre d'appariement élargie progressivement pour éviter des temps
 // d'attente indéfinis avec peu de joueurs simultanés — voir le contrat
@@ -26,12 +27,21 @@ interface TicketRow extends RowDataPacket {
 	opponent_id: number | null;
 	role: "host" | "guest" | null;
 	steam_lobby_id: string | null;
+	match_id: string | null;
+	match_session_token: string | null;
 	created_at: string;
 }
 
 type QueueStatusResult =
 	| { status: "waiting" }
-	| { status: "matched"; role: "host" | "guest"; opponent_id: number; steam_lobby_id?: number }
+	| {
+			status: "matched";
+			role: "host" | "guest";
+			opponent_id: number;
+			steam_lobby_id?: number;
+			match_id: string;
+			match_session_token: string;
+	  }
 	| { status: "cancelled" }
 	| { status: "expired" };
 
@@ -65,13 +75,19 @@ const findOpponent = async (connection: PoolConnection, ticket: TicketRow): Prom
 // l'autre par le FOR UPDATE de findOpponent).
 const pairTickets = async (connection: PoolConnection, ticket: TicketRow, opponent: TicketRow): Promise<void> => {
 	const hostId = Math.min(ticket.user_id, opponent.user_id);
+	// matchId/jeton émis une seule fois ici, à l'appariement réel côté serveur
+	// — voir helper/matchSessionToken.ts et TODO.md P9. Les deux tickets
+	// reçoivent le même matchId/jeton : chaque joueur le relit à son prochain
+	// poll (toStatusResult) et le renvoie tel quel avec POST .../matches/report.
+	const matchId = randomUUID();
+	const matchSessionToken = issueMatchSessionToken(matchId, ticket.user_id, opponent.user_id);
 	await connection.query(
-		"UPDATE matchmaking_tickets SET status = 'matched', opponent_id = ?, role = ? WHERE id = ?",
-		[opponent.user_id, ticket.user_id === hostId ? "host" : "guest", ticket.id],
+		"UPDATE matchmaking_tickets SET status = 'matched', opponent_id = ?, role = ?, match_id = ?, match_session_token = ? WHERE id = ?",
+		[opponent.user_id, ticket.user_id === hostId ? "host" : "guest", matchId, matchSessionToken, ticket.id],
 	);
 	await connection.query(
-		"UPDATE matchmaking_tickets SET status = 'matched', opponent_id = ?, role = ? WHERE id = ?",
-		[ticket.user_id, opponent.user_id === hostId ? "host" : "guest", opponent.id],
+		"UPDATE matchmaking_tickets SET status = 'matched', opponent_id = ?, role = ?, match_id = ?, match_session_token = ? WHERE id = ?",
+		[ticket.user_id, opponent.user_id === hostId ? "host" : "guest", matchId, matchSessionToken, opponent.id],
 	);
 };
 
@@ -90,7 +106,8 @@ const joinQueue = async (userId: number): Promise<string> => {
 			 VALUES (?, ?, ?, 'waiting')
 			 ON DUPLICATE KEY UPDATE
 			   ticket_id = VALUES(ticket_id), mmr = VALUES(mmr), status = 'waiting',
-			   opponent_id = NULL, role = NULL, steam_lobby_id = NULL, created_at = CURRENT_TIMESTAMP`,
+			   opponent_id = NULL, role = NULL, steam_lobby_id = NULL,
+			   match_id = NULL, match_session_token = NULL, created_at = CURRENT_TIMESTAMP`,
 			[ticketId, userId, stats.mmr],
 		);
 		const [rows] = await connection.query<TicketRow[]>(
@@ -117,6 +134,8 @@ const toStatusResult = (ticket: TicketRow): QueueStatusResult => {
 			role: ticket.role as "host" | "guest",
 			opponent_id: ticket.opponent_id as number,
 			steam_lobby_id: ticket.steam_lobby_id ? Number(ticket.steam_lobby_id) : undefined,
+			match_id: ticket.match_id as string,
+			match_session_token: ticket.match_session_token as string,
 		};
 	}
 	if (ticket.status === "cancelled") return { status: "cancelled" };
