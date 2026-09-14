@@ -3,6 +3,7 @@ import { Request, Response } from "express";
 import {
 	findByUserId,
 	findCardsByDeckId,
+	findCardsByUserId,
 	findById,
 	create,
 	updateName,
@@ -11,6 +12,7 @@ import {
 } from "../model/decksModel";
 import { findMissing, findCardTypes, MAX_COPIES_PER_CARD } from "../model/collectionModel";
 import { getUserId } from "../helper/requestUser";
+import db from "../model/db";
 
 const getUserDecks = async (req: Request, res: Response): Promise<void> => {
 	try {
@@ -21,12 +23,19 @@ const getUserDecks = async (req: Request, res: Response): Promise<void> => {
 		}
 
 		const decks = await findByUserId(userId);
-		const decksWithCards = await Promise.all(
-			decks.map(async (deck) => {
-				const cards = await findCardsByDeckId(deck.id);
-				return { ...deck, cards };
-			}),
-		);
+		// Une requête pour tous les decks (JOIN) plutôt qu'un findCardsByDeckId
+		// par deck (N+1) : on regroupe ensuite par deck_id en mémoire.
+		const allCards = await findCardsByUserId(userId);
+		const cardsByDeck = new Map<number, typeof allCards>();
+		for (const card of allCards) {
+			const list = cardsByDeck.get(card.deck_id) ?? [];
+			list.push(card);
+			cardsByDeck.set(card.deck_id, list);
+		}
+		const decksWithCards = decks.map((deck) => ({
+			...deck,
+			cards: cardsByDeck.get(deck.id) ?? [],
+		}));
 
 		res.status(200).json(decksWithCards);
 	} catch (error) {
@@ -125,12 +134,29 @@ const save = async (req: Request, res: Response): Promise<void> => {
 				res.status(404).json({ message: "Deck introuvable" });
 				return;
 			}
-			await updateName(deckId, name);
 		} else {
-			deckId = await create(userId, name);
+			deckId = 0; // affecté dans la transaction ci-dessous
 		}
 
-		await replaceCards(deckId, entries);
+		// create/updateName + replaceCards dans une seule transaction : sans
+		// cela, une erreur entre les deux (perte de connexion DB, etc.) pouvait
+		// laisser un deck fraîchement créé sans aucune carte (orphelin).
+		const connection = await db.getConnection();
+		try {
+			await connection.beginTransaction();
+			if (paramId) {
+				await updateName(deckId, name, connection);
+			} else {
+				deckId = await create(userId, name, connection);
+			}
+			await replaceCards(deckId, entries, connection);
+			await connection.commit();
+		} catch (error) {
+			await connection.rollback();
+			throw error;
+		} finally {
+			connection.release();
+		}
 
 		res.status(200).json({ id: deckId, name, entries });
 	} catch (error) {
