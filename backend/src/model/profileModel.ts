@@ -22,8 +22,8 @@ const getCollectionCount = async (userId: number): Promise<number> => {
 };
 
 // Position dans le classement de la saison en cours (1 = premier) : nombre de
-// joueurs avec un MMR strictement supérieur, +1. Coût raisonnable au volume
-// actuel (index sur ranked_stats.mmr côté requête getLeaderboard existante).
+// joueurs avec un MMR strictement supérieur, +1. Couvert par l'index
+// idx_ranked_stats_season_mmr (season, mmr) — voir schema.sql.
 const getRank = async (mmr: number): Promise<number> => {
 	const [rows] = await db.query<(RowDataPacket & { rank: number })[]>(
 		"SELECT COUNT(*) + 1 AS rank FROM ranked_stats WHERE season = ? AND mmr > ?",

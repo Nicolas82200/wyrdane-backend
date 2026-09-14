@@ -171,15 +171,24 @@ const templateByCode = (code: string): UniqueQuestTemplate | undefined =>
 // de reset) puis renvoie toujours l'intégralité du catalogue pour ce joueur
 // — même pattern paresseux/idempotent que ensureTodayQuests/
 // ensureThisWeekQuests.
+// Un seul INSERT multi-lignes plutôt qu'une requête par template (appelé à
+// chaque getUniqueQuests/progression de match/ouverture de pack) : latence
+// cumulée évitée sur un endpoint attendu par le joueur en sortie de partie.
 const ensureUniqueQuests = async (userId: number): Promise<UniqueQuestRow[]> => {
-	for (const template of UNIQUE_QUEST_TEMPLATES) {
-		await db.query(
-			`INSERT INTO unique_quests (user_id, quest_code, progress, target, reward_currency, reward_pack)
-			 VALUES (?, ?, 0, ?, ?, ?)
-			 ON DUPLICATE KEY UPDATE user_id = user_id`,
-			[userId, template.code, template.target, template.rewardCurrency, template.rewardPack],
-		);
-	}
+	const values = UNIQUE_QUEST_TEMPLATES.map((template) => [
+		userId,
+		template.code,
+		0,
+		template.target,
+		template.rewardCurrency,
+		template.rewardPack,
+	]);
+	await db.query(
+		`INSERT INTO unique_quests (user_id, quest_code, progress, target, reward_currency, reward_pack)
+		 VALUES ?
+		 ON DUPLICATE KEY UPDATE user_id = user_id`,
+		[values],
+	);
 	const [rows] = await db.query<UniqueQuestRow[]>(
 		"SELECT * FROM unique_quests WHERE user_id = ? ORDER BY id",
 		[userId],

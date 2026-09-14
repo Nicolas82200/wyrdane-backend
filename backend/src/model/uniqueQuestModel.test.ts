@@ -47,13 +47,11 @@ const templateRow = (overrides: Partial<Record<string, unknown>> = {}) => ({
 	...overrides,
 });
 
-// ensureUniqueQuests fait 1 upsert par template du catalogue puis 1 SELECT.
+// ensureUniqueQuests fait 1 upsert multi-lignes pour tout le catalogue puis 1 SELECT.
 const TEMPLATE_COUNT = UNIQUE_QUEST_TEMPLATES.length;
 
 const queueEnsureUniqueQuests = (rows: unknown[]) => {
-	for (let i = 0; i < TEMPLATE_COUNT; i++) {
-		mockedDb.query.mockResolvedValueOnce([{}]);
-	}
+	mockedDb.query.mockResolvedValueOnce([{}]);
 	mockedDb.query.mockResolvedValueOnce([rows]);
 };
 
@@ -65,12 +63,14 @@ describe("ensureUniqueQuests", () => {
 
 		const rows = await ensureUniqueQuests(1);
 
-		expect(mockedDb.query).toHaveBeenCalledTimes(TEMPLATE_COUNT + 1);
+		expect(mockedDb.query).toHaveBeenCalledTimes(2);
 		expect(mockedDb.query).toHaveBeenNthCalledWith(
 			1,
 			expect.stringContaining("ON DUPLICATE KEY UPDATE"),
-			[1, expect.any(String), expect.any(Number), expect.any(Number), expect.any(Number)],
+			[expect.arrayContaining([expect.arrayContaining([1])])],
 		);
+		const [, [insertedRows]] = mockedDb.query.mock.calls[0];
+		expect(insertedRows).toHaveLength(TEMPLATE_COUNT);
 		expect(rows).toHaveLength(1);
 	});
 });

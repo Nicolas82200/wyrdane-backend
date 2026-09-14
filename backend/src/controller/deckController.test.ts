@@ -16,8 +16,23 @@ vi.mock("../model/collectionModel", () => ({
 	MAX_COPIES_PER_CARD: 4,
 }));
 
+// save() ouvre sa propre transaction (db.getConnection()) autour de
+// create/updateName + replaceCards (voir deckController.ts) : une fausse
+// connexion minimale suffit, beginTransaction/commit/rollback/release sont
+// des no-op puisque decksModel lui-même est entièrement mocké ci-dessus.
+const fakeConnection = {
+	beginTransaction: vi.fn(),
+	commit: vi.fn(),
+	rollback: vi.fn(),
+	release: vi.fn(),
+};
+vi.mock("../model/db", () => ({
+	default: { getConnection: vi.fn(() => Promise.resolve(fakeConnection)) },
+}));
+
 import { findById, create, updateName, replaceCards, deleteDeck } from "../model/decksModel";
 import { findMissing, findCardTypes } from "../model/collectionModel";
+import db from "../model/db";
 import { save, remove } from "./deckController";
 
 const mocked = {
@@ -42,6 +57,7 @@ describe("save (deck create/update)", () => {
 	beforeEach(() => {
 		vi.resetAllMocks();
 		mocked.findCardTypes.mockResolvedValue(new Map());
+		(db.getConnection as ReturnType<typeof vi.fn>).mockResolvedValue(fakeConnection);
 	});
 
 	it("rejects entries that exceed the max copies per card", async () => {
@@ -87,7 +103,7 @@ describe("save (deck create/update)", () => {
 
 		await save(req, res);
 
-		expect(mocked.create).toHaveBeenCalledWith(1, "Mon deck");
+		expect(mocked.create).toHaveBeenCalledWith(1, "Mon deck", fakeConnection);
 		expect(res.status).toHaveBeenCalledWith(200);
 	});
 
@@ -120,8 +136,8 @@ describe("save (deck create/update)", () => {
 
 		await save(req, res);
 
-		expect(mocked.create).toHaveBeenCalledWith(1, "Mon deck");
-		expect(mocked.replaceCards).toHaveBeenCalledWith(42, [{ cardId: 1, quantity: 2 }]);
+		expect(mocked.create).toHaveBeenCalledWith(1, "Mon deck", fakeConnection);
+		expect(mocked.replaceCards).toHaveBeenCalledWith(42, [{ cardId: 1, quantity: 2 }], fakeConnection);
 		expect(res.status).toHaveBeenCalledWith(200);
 	});
 
@@ -137,7 +153,7 @@ describe("save (deck create/update)", () => {
 
 		await save(req, res);
 
-		expect(mocked.updateName).toHaveBeenCalledWith(9, "Nouveau nom");
+		expect(mocked.updateName).toHaveBeenCalledWith(9, "Nouveau nom", fakeConnection);
 		expect(mocked.create).not.toHaveBeenCalled();
 	});
 });

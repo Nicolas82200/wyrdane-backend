@@ -22,6 +22,17 @@ const runSqlFile = async (connection: mysql.Connection, label: string, path: str
 };
 
 const main = async (): Promise<void> => {
+	// Garde technique : ce script DROP + recrée tout le schéma, réservé au
+	// dev/CI (voir en-tête). Un lancement accidentel en prod (mauvais .env,
+	// mauvaise machine) effacerait toutes les données joueurs sans recours.
+	if (process.env.NODE_ENV === "production" && !process.argv.includes("--confirm-prod-wipe")) {
+		console.error(
+			"Refus d'exécuter db:migrate avec NODE_ENV=production : ce script DROP toute la base.\n" +
+				"Si c'est réellement voulu, relance avec --confirm-prod-wipe.",
+		);
+		process.exit(1);
+	}
+
 	// Pas de DB_NAME ici : schema.sql fait lui-même le DROP/CREATE DATABASE,
 	// donc la connexion initiale ne doit pas cibler une base précise.
 	const connection = await mysql.createConnection({

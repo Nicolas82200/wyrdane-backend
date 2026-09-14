@@ -205,11 +205,29 @@ describe("steamOpenIdCallback", () => {
 });
 
 describe("logout / authVerif", () => {
-	it("clears the auth cookie on logout", () => {
+	it("clears the auth cookie on logout with the same attributes it was set with", () => {
+		process.env.NODE_ENV = "production";
 		const req = {} as Request;
 		const res = mockRes();
 		logout(req, res);
-		expect(res.clearCookie).toHaveBeenCalledWith("auth_token");
+		expect(res.clearCookie).toHaveBeenCalledWith("auth_token", {
+			httpOnly: true,
+			secure: true,
+			sameSite: "none",
+		});
+		expect(res.sendStatus).toHaveBeenCalledWith(200);
+	});
+
+	it("clears the auth cookie with dev attributes outside production", () => {
+		process.env.NODE_ENV = "development";
+		const req = {} as Request;
+		const res = mockRes();
+		logout(req, res);
+		expect(res.clearCookie).toHaveBeenCalledWith("auth_token", {
+			httpOnly: true,
+			secure: false,
+			sameSite: "lax",
+		});
 		expect(res.sendStatus).toHaveBeenCalledWith(200);
 	});
 

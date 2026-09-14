@@ -9,6 +9,7 @@
 		"build": "tsc",
 		"start": "node dist/index.js",
 		"db:migrate": "tsx src/database/migrate.ts",
+		"db:reset-players": "tsx src/database/resetPlayers.ts",
 		"db:sync": "tsx src/database/sync.ts",
 		"db:sync-cards": "tsx src/database/syncCardsData.ts",
 		"test": "vitest run"
@@ -18,7 +19,6 @@
 		"cors": "^2.8.6",
 		"dotenv": "^17.4.2",
 		"express": "^5.2.1",
-		"joi": "^18.2.3",
 		"jsonwebtoken": "^9.0.3",
 		"mysql2": "^3.23.0",
 		"nodemailer": "^9.0.3"
@@ -30,8 +30,6 @@
 		"@types/jsonwebtoken": "^9.0.10",
 		"@types/node": "^22.10.2",
 		"@types/nodemailer": "^8.0.1",
-		"nodemon": "^3.1.14",
-		"ts-node": "^10.9.2",
 		"tsx": "^4.23.1",
 		"typescript": "^5.7.2",
 		"vitest": "^4.1.10"

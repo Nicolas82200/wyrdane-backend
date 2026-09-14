@@ -116,7 +116,7 @@ const pickTemplatesFor = (userId: number, day: number): QuestTemplate[] => {
 	return picked;
 };
 
-// Assigne les 3 quêtes du jour au premier appel de la journée pour ce joueur
+// Assigne les QUESTS_PER_DAY quêtes du jour au premier appel de la journée pour ce joueur
 // (paresseux, même pattern que rankedModel.getStats/solo_stats.getStats),
 // puis les renvoie — idempotent, un second appel le même jour ne change rien.
 const ensureTodayQuests = async (userId: number): Promise<DailyQuestRow[]> => {

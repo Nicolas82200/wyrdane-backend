@@ -2,6 +2,7 @@ import { Router } from "express";
 import authorization from "../middleware/auth";
 import requireCsrfHeader from "../middleware/csrf";
 import requireAdmin from "../middleware/requireAdmin";
+import rateLimit from "../middleware/rateLimit";
 import adminRouter from "./adminRouter";
 import analyticsRouter from "./analyticsRouter";
 import authRouter from "./authRouter";
@@ -31,7 +32,8 @@ const router = Router();
 router.use("/users", authorization, requireCsrfHeader, userRouter);
 router.use("/auth", authRouter);
 
-router.use("/admin", authorization, requireCsrfHeader, requireAdmin, adminRouter);
+const adminLimit = rateLimit({ windowMs: 10 * 60 * 1000, max: 60, name: "admin" });
+router.use("/admin", authorization, requireCsrfHeader, requireAdmin, adminLimit, adminRouter);
 router.use("/analytics", analyticsRouter);
 router.use("/cards", authorization, requireCsrfHeader, cardRouter);
 router.use("/collection", authorization, requireCsrfHeader, collectionRouter);

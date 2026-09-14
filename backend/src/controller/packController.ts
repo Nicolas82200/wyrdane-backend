@@ -32,7 +32,7 @@ const openPackHandler = async (req: Request, res: Response): Promise<void> =>
 // Dev uniquement (flag DEV_FREE_PACKS, même pattern que DEV_GRANT_ALL_CARDS) :
 // ouvre un pack sans débiter le solde, pour tester l'écran d'ouverture.
 const openFreePackHandler = async (req: Request, res: Response): Promise<void> => {
-	if (process.env.DEV_FREE_PACKS !== "true") {
+	if (process.env.NODE_ENV === "production" || process.env.DEV_FREE_PACKS !== "true") {
 		res.status(403).json({ message: "Packs gratuits désactivés" });
 		return;
 	}

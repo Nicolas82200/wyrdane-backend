@@ -7,7 +7,8 @@ import {
 	findSteamId,
 	createPendingPurchase,
 	setTxnId,
-	findPendingPurchase,
+	lockPendingPurchase,
+	revertToPending,
 	completePurchase,
 } from "../model/shopModel";
 import { initTxn, finalizeTxn } from "../helper/steamMicrotxnHelper";
@@ -103,13 +104,18 @@ const finalizePurchase = async (req: Request, res: Response): Promise<void> => {
 			return;
 		}
 
-		const purchase = await findPendingPurchase(orderId, userId);
+		const purchase = await lockPendingPurchase(orderId, userId);
 		if (!purchase) {
 			res.status(404).json({ message: "Achat introuvable ou déjà finalisé" });
 			return;
 		}
 
-		const success = await finalizeTxn(orderId);
+		let success = false;
+		try {
+			success = await finalizeTxn(orderId);
+		} finally {
+			if (!success) await revertToPending(orderId);
+		}
 		if (!success) {
 			res.status(502).json({ message: "Échec de la finalisation Steam" });
 			return;

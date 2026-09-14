@@ -11,6 +11,8 @@ const CATEGORY_LABELS: Record<string, string> = {
 };
 
 const MAX_MESSAGE_LENGTH = 5000;
+const MAX_NAME_LENGTH = 200;
+const MAX_PORTFOLIO_LINK_LENGTH = 500;
 
 type ContactBody = {
 	name?: string;
@@ -49,6 +51,14 @@ const submitContact = async (req: Request, res: Response): Promise<void> => {
 		}
 		if (message.length > MAX_MESSAGE_LENGTH) {
 			res.status(400).json({ message: "Message trop long" });
+			return;
+		}
+		if (name.length > MAX_NAME_LENGTH) {
+			res.status(400).json({ message: "Nom trop long" });
+			return;
+		}
+		if (portfolioLink && portfolioLink.length > MAX_PORTFOLIO_LINK_LENGTH) {
+			res.status(400).json({ message: "Lien portfolio trop long" });
 			return;
 		}
 

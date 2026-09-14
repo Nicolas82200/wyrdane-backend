@@ -36,6 +36,23 @@ const findCardsByDeckId = async (deckId: number): Promise<DeckCardRow[]> => {
 	return rows;
 };
 
+// Équivalent de findCardsByDeckId pour tous les decks d'un joueur en une
+// seule requête (JOIN sur decks plutôt qu'un findCardsByDeckId par deck,
+// voir deckController.getUserDecks) : évite un aller-retour DB par deck.
+const findCardsByUserId = async (userId: number): Promise<DeckCardRow[]> => {
+	const [rows] = await db.query<DeckCardRow[]>(
+		`SELECT dc.deck_id, dc.card_id, dc.quantity,
+		        c.name, c.race, c.card_type, c.lane, c.cost,
+		        c.attack, c.hp, c.rarity, c.charges, c.effect, c.flavor, c.image_path
+		 FROM deck_cards dc
+		 JOIN cards c ON c.id = dc.card_id
+		 JOIN decks d ON d.id = dc.deck_id
+		 WHERE d.user_id = ?`,
+		[userId],
+	);
+	return rows;
+};
+
 const findById = async (deckId: number): Promise<DeckRow | null> => {
 	const [rows] = await db.query<DeckRow[]>(
 		"SELECT id, user_id, name, created_at FROM decks WHERE id = ?",
@@ -57,8 +74,9 @@ const create = async (
 	return result.insertId;
 };
 
-const updateName = async (deckId: number, name: string): Promise<void> => {
-	await db.query("UPDATE decks SET name = ? WHERE id = ?", [name, deckId]);
+const updateName = async (deckId: number, name: string, connection?: PoolConnection): Promise<void> => {
+	const runner = connection ?? db;
+	await runner.query("UPDATE decks SET name = ? WHERE id = ?", [name, deckId]);
 };
 
 const replaceCards = async (
@@ -79,6 +97,7 @@ const replaceCards = async (
 export {
 	findByUserId,
 	findCardsByDeckId,
+	findCardsByUserId,
 	findById,
 	create,
 	updateName,
