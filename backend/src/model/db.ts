@@ -19,6 +19,9 @@ const pool = mysql.createPool({
   database: DB_NAME,
   charset: "utf8mb4",
   ssl: DB_SSL === "true" ? { rejectUnauthorized: false } : undefined,
+  // Explicite plutôt que le défaut mysql2 (10) : rend la limite visible et
+  // ajustable ici plutôt que dépendante d'une valeur implicite de la lib.
+  connectionLimit: 10,
 });
 
 export default pool;

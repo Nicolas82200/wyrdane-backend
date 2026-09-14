@@ -102,7 +102,10 @@ const ensureAdminFromEnv = async (userId: number, steamId: string): Promise<void
 		.filter(Boolean);
 	if (!adminSteamIds.includes(steamId)) return;
 
-	await db.query("UPDATE `users` SET is_admin = TRUE WHERE id = ?", [userId]);
+	// Condition sur is_admin = FALSE : évite un UPDATE (et une écriture WAL)
+	// à chaque login d'un compte déjà admin, alors que ça n'a d'effet
+	// qu'une seule fois par compte.
+	await db.query("UPDATE `users` SET is_admin = TRUE WHERE id = ? AND is_admin = FALSE", [userId]);
 };
 
 export {
