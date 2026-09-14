@@ -134,7 +134,10 @@ CREATE TABLE ranked_stats (
   losses INT NOT NULL DEFAULT 0,
   win_streak INT NOT NULL DEFAULT 0,
   season INT NOT NULL DEFAULT 1,
-  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  -- Sert getRank/getLeaderboard (profileModel.ts) : classement/rang par
+  -- saison, sinon scan complet de la table à chaque affichage de profil.
+  INDEX idx_ranked_stats_season_mmr (season, mmr)
 );
 
 -- File d'attente de matchmaking classé (appariement par MMR) : un ticket par

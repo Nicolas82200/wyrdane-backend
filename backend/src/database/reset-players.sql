@@ -10,6 +10,10 @@
 -- dashboard Render/hébergeur MySQL, jamais dans ce repo). Irréversible sans
 -- backup préalable — faire un dump avant si un doute existe :
 --   mysqldump -h <DB_HOST> -u <DB_USER> -p <DB_NAME> > backup_avant_reset.sql
+--
+-- Préférer resetPlayers.ts (npm run db:reset-players -- --confirm-wipe-players),
+-- qui impose cette confirmation explicite avant d'exécuter ce fichier — ce
+-- .sql brut reste ici en repli si mysql CLI est la seule option disponible.
 
 DELETE FROM users;
 ALTER TABLE users AUTO_INCREMENT = 1;

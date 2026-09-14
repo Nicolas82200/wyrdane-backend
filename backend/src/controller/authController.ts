@@ -159,7 +159,16 @@ const steamOpenIdCallback = async (req: Request, res: Response): Promise<void> =
 };
 
 const logout = (req: Request, res: Response): void => {
-	res.clearCookie("auth_token").sendStatus(200);
+	// clearCookie doit être appelé avec les mêmes attributs que la pose
+	// (voir steamLogin ci-dessus) : un navigateur n'efface un cookie que si
+	// le Set-Cookie de suppression matche exactement domain/path/sameSite/
+	// secure de l'original, sinon le cookie de session reste posé.
+	const isProduction = process.env.NODE_ENV === "production";
+	res.clearCookie("auth_token", {
+		httpOnly: true,
+		secure: isProduction,
+		sameSite: isProduction ? "none" : "lax",
+	}).sendStatus(200);
 };
 
 const authVerif = (req: Request, res: Response): void => {

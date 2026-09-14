@@ -82,6 +82,22 @@ const ensureRankedStatsColumns = async (connection: mysql.Connection): Promise<v
 	}
 };
 
+// Index (season, mmr) ajouté après la création initiale de ranked_stats
+// (voir schema.sql) : sert getRank/getLeaderboard (profileModel.ts), sinon
+// scan complet de la table à chaque affichage de profil. CREATE INDEX ne
+// supporte pas IF NOT EXISTS en MySQL/MariaDB — vérifié via information_schema
+// pour rester rejouable sans erreur sur une base déjà à jour.
+const ensureRankedStatsIndex = async (connection: mysql.Connection): Promise<void> => {
+	const [rows] = await connection.query<mysql.RowDataPacket[]>(
+		`SELECT INDEX_NAME FROM information_schema.STATISTICS
+		 WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'ranked_stats' AND INDEX_NAME = 'idx_ranked_stats_season_mmr'`,
+		[DB_NAME],
+	);
+	if (rows.length > 0) return;
+	console.log("→ Ajout de l'index ranked_stats(season, mmr)...");
+	await connection.query("CREATE INDEX idx_ranked_stats_season_mmr ON ranked_stats (season, mmr)");
+};
+
 // username n'a plus vocation à être unique (voir schema.sql) : c'est
 // désormais le pseudo Steam affiché, que plusieurs joueurs peuvent partager.
 // Un index inline UNIQUE ancien est nommé comme la colonne par défaut en
@@ -162,6 +178,7 @@ const main = async (): Promise<void> => {
 		// Après le CREATE TABLE IF NOT EXISTS ci-dessus : ranked_stats/solo_stats/
 		// match_reports sont garanties d'exister avant qu'on tente d'y ajouter une colonne.
 		await ensureRankedStatsColumns(connection);
+		await ensureRankedStatsIndex(connection);
 		await ensureSoloStatsColumns(connection);
 		await ensureMatchReportsColumns(connection);
 		await ensureMatchmakingTicketsColumns(connection);

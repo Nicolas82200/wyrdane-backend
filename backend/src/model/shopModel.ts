@@ -88,6 +88,48 @@ const findPendingPurchase = async (
 	return rows[0] ?? null;
 };
 
+// Verrouille l'achat en 'processing' avant d'appeler Steam (voir
+// finalizePurchase) : deux appels concurrents à /shop/finalize pour le même
+// orderId (double-clic, retry réseau) sérialisent sur le verrou de ligne
+// (FOR UPDATE) au lieu de tous les deux passer le check "pending" et
+// déclencher deux finalizeTxn Steam pour le même achat. Renvoie null si
+// l'achat n'existe pas, n'appartient pas à userId, ou n'est plus 'pending'
+// (déjà en cours ou déjà finalisé par un appel concurrent).
+const lockPendingPurchase = async (
+	orderId: number,
+	userId: number,
+): Promise<PurchaseLedgerRow | null> => {
+	const connection = await db.getConnection();
+	try {
+		await connection.beginTransaction();
+		const [rows] = await connection.query<PurchaseLedgerRow[]>(
+			"SELECT * FROM purchase_ledger WHERE order_id = ? AND user_id = ? AND status = 'pending' FOR UPDATE",
+			[orderId, userId],
+		);
+		const purchase = rows[0] ?? null;
+		if (!purchase) {
+			await connection.rollback();
+			return null;
+		}
+		await connection.query("UPDATE purchase_ledger SET status = 'processing' WHERE order_id = ?", [orderId]);
+		await connection.commit();
+		return purchase;
+	} catch (error) {
+		await connection.rollback();
+		throw error;
+	} finally {
+		connection.release();
+	}
+};
+
+// Repli si finalizeTxn échoue après le verrouillage : rend l'achat à nouveau
+// 'pending' pour qu'un retry (ou le joueur) puisse retenter la finalisation.
+const revertToPending = async (orderId: number): Promise<void> => {
+	await db.query("UPDATE purchase_ledger SET status = 'pending' WHERE order_id = ? AND status = 'processing'", [
+		orderId,
+	]);
+};
+
 // Marque l'achat "completed" et crédite le cosmétique, en transaction pour ne
 // jamais avoir un ledger validé sans l'item correspondant (ou l'inverse).
 const completePurchase = async (
@@ -125,6 +167,8 @@ export {
 	findSteamId,
 	createPendingPurchase,
 	setTxnId,
+	lockPendingPurchase,
+	revertToPending,
 	findPendingPurchase,
 	completePurchase,
 };
