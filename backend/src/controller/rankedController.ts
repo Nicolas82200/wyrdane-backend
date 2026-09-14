@@ -9,6 +9,7 @@ import {
 	getLeaderboard,
 } from "../model/rankedModel";
 import { sanitizeCardsPlayedByRace, sanitizeDeckRaces } from "../helper/matchPayload";
+import { verifyMatchSessionToken } from "../helper/matchSessionToken";
 import { progressForMatch } from "../model/questModel";
 import { progressForMatch as progressWeeklyForMatch } from "../model/weeklyQuestModel";
 import { progressForMatch as progressUniqueForMatch, progressForRankTier } from "../model/uniqueQuestModel";
@@ -29,8 +30,9 @@ const reportMatch = async (req: Request, res: Response): Promise<void> => {
 			winnerId?: number;
 			cardsPlayedByRace?: Record<string, number>;
 			deckRaces?: string[];
+			matchSessionToken?: string;
 		};
-		const { clientMatchId, opponentId, winnerId } = rawBody;
+		const { clientMatchId, opponentId, winnerId, matchSessionToken } = rawBody;
 
 		if (
 			!clientMatchId ||
@@ -41,6 +43,26 @@ const reportMatch = async (req: Request, res: Response): Promise<void> => {
 		) {
 			res.status(400).json({ message: "Payload invalide" });
 			return;
+		}
+
+		// Preuve serveur qu'un appariement classé a réellement eu lieu entre ces
+		// deux joueurs (voir TODO.md P9, matchmakingModel.pairTickets émet ce
+		// jeton une seule fois par paire). ENFORCE_MATCH_SESSION_TOKEN=true fait
+		// rejeter tout rapport sans jeton valide et dont le matchId encodé ne
+		// correspond pas au clientMatchId déclaré ; en son absence (défaut), un
+		// jeton manquant/invalide n'est que journalisé — le temps que le client
+		// mis à jour (qui transmet ce jeton reçu au matchmaking) se déploie,
+		// pour ne pas casser le classé en cours de route pour la version en
+		// production qui ne l'envoie pas encore.
+		const enforceMatchSessionToken = process.env.ENFORCE_MATCH_SESSION_TOKEN === "true";
+		const sessionPayload = matchSessionToken ? verifyMatchSessionToken(matchSessionToken, userId, opponentId) : null;
+		const sessionValid = sessionPayload !== null && sessionPayload.matchId === clientMatchId;
+		if (!sessionValid) {
+			if (enforceMatchSessionToken) {
+				res.status(400).json({ message: "Session de match invalide ou absente" });
+				return;
+			}
+			console.warn(`reportMatch sans jeton de session valide (soft mode) : user=${userId} clientMatchId=${clientMatchId}`);
 		}
 
 		// Bornage défensif : un client menteur ne peut de toute façon pas être

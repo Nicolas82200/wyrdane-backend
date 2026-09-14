@@ -119,6 +119,28 @@ const ensureMatchReportsColumns = async (connection: mysql.Connection): Promise<
 	}
 };
 
+// match_id/match_session_token ajoutées à matchmaking_tickets après sa
+// création initiale (voir schema.sql) — même pattern que
+// ensureSoloStatsColumns. Voir helper/matchSessionToken.ts et TODO.md P9.
+const MATCHMAKING_TICKETS_COLUMNS_TO_ENSURE: { name: string; ddl: string }[] = [
+	{ name: "match_id", ddl: "match_id VARCHAR(36) NULL" },
+	{ name: "match_session_token", ddl: "match_session_token TEXT NULL" },
+];
+
+const ensureMatchmakingTicketsColumns = async (connection: mysql.Connection): Promise<void> => {
+	const [rows] = await connection.query<mysql.RowDataPacket[]>(
+		"SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'matchmaking_tickets'",
+		[DB_NAME],
+	);
+	const existing = new Set(rows.map((row) => row.COLUMN_NAME as string));
+
+	for (const column of MATCHMAKING_TICKETS_COLUMNS_TO_ENSURE) {
+		if (existing.has(column.name)) continue;
+		console.log(`→ Ajout de la colonne matchmaking_tickets.${column.name}...`);
+		await connection.query(`ALTER TABLE matchmaking_tickets ADD COLUMN ${column.ddl}`);
+	}
+};
+
 const main = async (): Promise<void> => {
 	const connection = await mysql.createConnection({
 		host: DB_HOST,
@@ -142,6 +164,7 @@ const main = async (): Promise<void> => {
 		await ensureRankedStatsColumns(connection);
 		await ensureSoloStatsColumns(connection);
 		await ensureMatchReportsColumns(connection);
+		await ensureMatchmakingTicketsColumns(connection);
 		console.log("✓ Schéma à jour, aucune donnée existante affectée.");
 	} finally {
 		await connection.end();
