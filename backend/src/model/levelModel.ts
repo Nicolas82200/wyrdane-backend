@@ -13,20 +13,31 @@ import type { Cards } from "../types";
 const XP_WIN_NETWORK = 50;
 const XP_LOSS_NETWORK = 15;
 
-// XP requise pour passer du niveau `level` à `level + 1` : chaque niveau
-// demande 5 % d'XP de plus que le seuil du niveau précédent (arrondi à
-// l'entier le plus proche à CHAQUE niveau, pas recalculé depuis la base à
-// chaque appel — le seuil du niveau 10 doit être +5 % du seuil arrondi du
-// niveau 9, pas 1.05^9 fois la base). Niveau 1 : 100 XP.
+// XP requise pour passer du niveau `level` à `level + 1` : croissance
+// linéaire, +10 XP de palier par niveau (110 au niveau 1, 120 au niveau 2,
+// 130 au niveau 3...). Contrairement à l'ancienne courbe géométrique, ne
+// dépend pas du seuil précédent — calcul direct, pas de dérive d'arrondi.
 const XP_CURVE_BASE = 100;
-const XP_CURVE_GROWTH = 1.05;
+const XP_CURVE_STEP = 10;
 
-const xpToReachNextLevel = (level: number): number => {
-	let xp = XP_CURVE_BASE;
-	for (let i = 1; i < level; i++) {
-		xp = Math.round(xp * XP_CURVE_GROWTH);
-	}
-	return xp;
+const xpToReachNextLevel = (level: number): number => XP_CURVE_BASE + XP_CURVE_STEP * level;
+
+// Multiplicateur appliqué à XP_WIN_NETWORK selon la série de victoires en
+// cours (ranked_stats.win_streak, incrémentée AVANT cet appel côté
+// rankedModel.confirmMatch) : palier atteint à 3/5/7 victoires d'affilée,
+// jamais appliqué à une défaite (streak retombe à 0). Remplace l'ancien
+// barème d'or par palier (WIN_STREAK_REWARD_TIERS) sur le même principe,
+// mais agit sur l'XP plutôt que sur l'or directement.
+const WIN_STREAK_XP_MULTIPLIER_TIERS: { minStreak: number; multiplier: number }[] = [
+	{ minStreak: 7, multiplier: 1.75 },
+	{ minStreak: 5, multiplier: 1.5 },
+	{ minStreak: 3, multiplier: 1.25 },
+	{ minStreak: 0, multiplier: 1 },
+];
+
+const winXpForStreak = (streak: number): number => {
+	const tier = WIN_STREAK_XP_MULTIPLIER_TIERS.find((t) => streak >= t.minStreak);
+	return Math.round(XP_WIN_NETWORK * (tier?.multiplier ?? 1));
 };
 
 // Rareté de la carte offerte tous les 5 niveaux, cyclique sur 20 niveaux
@@ -173,6 +184,7 @@ export {
 	XP_WIN_NETWORK,
 	XP_LOSS_NETWORK,
 	xpToReachNextLevel,
+	winXpForStreak,
 	getLevel,
 	applyXp,
 	addXp,

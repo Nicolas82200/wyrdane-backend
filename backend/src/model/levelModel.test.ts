@@ -57,12 +57,12 @@ const makeConnection = (
 };
 
 describe("xpToReachNextLevel", () => {
-	it("grows 5% per level over the previous (rounded) threshold, starting at 100", () => {
-		expect(xpToReachNextLevel(1)).toBe(100);
-		expect(xpToReachNextLevel(2)).toBe(105); // round(100 * 1.05)
-		expect(xpToReachNextLevel(3)).toBe(110); // round(105 * 1.05)
-		expect(xpToReachNextLevel(9)).toBe(148);
-		expect(xpToReachNextLevel(24)).toBe(307);
+	it("grows linearly, +10 XP per level over 100", () => {
+		expect(xpToReachNextLevel(1)).toBe(110);
+		expect(xpToReachNextLevel(2)).toBe(120);
+		expect(xpToReachNextLevel(3)).toBe(130);
+		expect(xpToReachNextLevel(9)).toBe(190);
+		expect(xpToReachNextLevel(24)).toBe(340);
 	});
 });
 
@@ -86,7 +86,7 @@ describe("applyXp", () => {
 		const result = await applyXp(1, 50, connection);
 
 		expect(result.level).toBe(2);
-		expect(result.xp).toBe(40); // 90 + 50 - 100 (xpToReachNextLevel(1))
+		expect(result.xp).toBe(30); // 90 + 50 - 110 (xpToReachNextLevel(1))
 		expect(mockedCredit).toHaveBeenCalledWith(1, 20, "level_reward_gold", "level_2", connection);
 		expect(result.rewards).toEqual([{ level: 2, type: "gold", gold: 20 }]);
 	});
@@ -159,8 +159,8 @@ describe("applyXp", () => {
 
 	it("grants a reward for every level crossed in a single large XP gain", async () => {
 		const connection = makeConnection({ level: 1, xp: 0 });
-		// xpToReachNextLevel(1)=100, (2)=105 : 205 XP franchit pile les niveaux 2 et 3.
-		const result = await applyXp(6, 205, connection);
+		// xpToReachNextLevel(1)=110, (2)=120 : 230 XP franchit pile les niveaux 2 et 3.
+		const result = await applyXp(6, 230, connection);
 
 		expect(result.level).toBe(3);
 		expect(result.xp).toBe(0);
