@@ -1,35 +1,11 @@
 import type { RowDataPacket } from "mysql2";
 import db from "./db";
 import { calculateElo } from "../helper/eloHelper";
-import { credit } from "./currencyModel";
+import { applyXp, XP_WIN_NETWORK, XP_LOSS_NETWORK } from "./levelModel";
+import type { LevelReward } from "./levelModel";
 
 const CURRENT_SEASON = 1;
 const DEFAULT_MMR = 1000;
-
-const RANKED_WIN_BASE_REWARD = 10;
-const RANKED_WIN_REASON = "match_win_ranked";
-
-const RANKED_DEFEAT_REWARD = 5;
-const RANKED_DEFEAT_REASON = "match_loss_ranked";
-
-// Même barème que l'ancienne récompense solo (voir devlog 2026-08-26) :
-// désormais repris par le classé exclusivement, un match solo/vs IA ne
-// rapporte plus d'or du tout (voir rewardsController.reportSoloMatch). La
-// série ne compte que les victoires classées consécutives du joueur
-// concerné, remise à 0 par n'importe quelle défaite — voir son propre
-// win_streak dans ranked_stats, distinct de wins/losses qui ne font
-// qu'accumuler. Triés du palier le plus haut au plus bas pour que le
-// premier match trouvé soit le bon.
-const WIN_STREAK_REWARD_TIERS: { streak: number; reward: number }[] = [
-	{ streak: 7, reward: 25 },
-	{ streak: 5, reward: 20 },
-	{ streak: 3, reward: 15 },
-];
-
-const rewardForWinStreak = (streak: number): number => {
-	const tier = WIN_STREAK_REWARD_TIERS.find((candidate) => streak >= candidate.streak);
-	return tier ? tier.reward : RANKED_WIN_BASE_REWARD;
-};
 
 interface RankedStatsRow extends RowDataPacket {
 	user_id: number;
@@ -59,6 +35,8 @@ interface MatchHistoryRow extends RowDataPacket {
 	winner_id: number;
 	season: number;
 	played_at: string;
+	xp_awarded_player1: number;
+	xp_awarded_player2: number;
 }
 
 const getStats = async (userId: number): Promise<RankedStatsRow> => {
@@ -119,17 +97,25 @@ const createReport = async (
 };
 
 // Valide le match : calcule le nouveau MMR des deux joueurs, met à jour leur
-// série de victoires et crédite chacun (vainqueur comme perdant, même barème
-// que l'ancienne récompense solo — voir WIN_STREAK_REWARD_TIERS), en
-// transaction pour ne jamais désynchroniser stats/historique/monnaie.
-// Renvoie la récompense créditée à player1Id (l'appelant côté contrôleur,
-// voir rankedController.reportMatch).
+// série de victoires et crédite chacun en XP de compte (voir levelModel,
+// XP_WIN_NETWORK/XP_LOSS_NETWORK — remplace l'ancien barème d'or par match),
+// en transaction pour ne jamais désynchroniser stats/historique/XP. Renvoie
+// l'XP gagné et le nouvel état de niveau de player1Id (l'appelant côté
+// contrôleur, voir rankedController.reportMatch).
 const confirmMatch = async (
 	clientMatchId: string,
 	player1Id: number,
 	player2Id: number,
 	winnerId: number,
-): Promise<{ reward: number; ratingA: number; ratingB: number }> => {
+): Promise<{
+	xpGained: number;
+	level: number;
+	xp: number;
+	xpToNext: number;
+	rewards: LevelReward[];
+	ratingA: number;
+	ratingB: number;
+}> => {
 	const connection = await db.getConnection();
 	try {
 		await connection.beginTransaction();
@@ -159,8 +145,8 @@ const confirmMatch = async (
 		const player2Won = winnerId === player2Id;
 		const newStreak1 = player1Won ? (stats.get(player1Id)?.win_streak ?? 0) + 1 : 0;
 		const newStreak2 = player2Won ? (stats.get(player2Id)?.win_streak ?? 0) + 1 : 0;
-		const reward1 = player1Won ? rewardForWinStreak(newStreak1) : RANKED_DEFEAT_REWARD;
-		const reward2 = player2Won ? rewardForWinStreak(newStreak2) : RANKED_DEFEAT_REWARD;
+		const xpGained1 = player1Won ? XP_WIN_NETWORK : XP_LOSS_NETWORK;
+		const xpGained2 = player2Won ? XP_WIN_NETWORK : XP_LOSS_NETWORK;
 
 		await connection.query(
 			"UPDATE ranked_stats SET mmr = ?, wins = wins + ?, losses = losses + ?, win_streak = ? WHERE user_id = ?",
@@ -171,27 +157,37 @@ const confirmMatch = async (
 			[newRatingB, player2Won ? 1 : 0, player2Won ? 0 : 1, newStreak2, player2Id],
 		);
 
+		// xp_awarded_player1/2 journalisent l'XP brute accordée à ce match (pas
+		// l'état de niveau, qui évolue au fil des matchs suivants) : sert à
+		// rankedController.reportMatch à retrouver ce montant sur un rapport
+		// rejoué après confirmation, client_match_id étant UNIQUE sur cette
+		// table — confirmMatch ne peut s'exécuter (et donc créditer l'XP)
+		// qu'une seule fois par match, un retry réseau ne peut pas la dupliquer.
 		await connection.query(
-			"INSERT INTO match_history (client_match_id, player1_id, player2_id, winner_id, season) VALUES (?, ?, ?, ?, ?)",
-			[clientMatchId, player1Id, player2Id, winnerId, CURRENT_SEASON],
+			`INSERT INTO match_history
+			 (client_match_id, player1_id, player2_id, winner_id, season, xp_awarded_player1, xp_awarded_player2)
+			 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			[clientMatchId, player1Id, player2Id, winnerId, CURRENT_SEASON, xpGained1, xpGained2],
 		);
 
-		// client_match_id est UNIQUE sur match_history : confirmMatch ne peut
-		// s'exécuter qu'une fois par match, donc ces crédits ne peuvent pas être
-		// dupliqués par un retry réseau du rapport de match. Les deux joueurs
-		// sont crédités ici (contrairement à l'ancien comportement où seul le
-		// vainqueur touchait quelque chose) : reference=clientMatchId permet à
-		// rankedController de retrouver le montant exact de chacun sur un rapport
-		// rejoué après confirmation (voir currencyModel.getCreditedAmountForReference).
-		await credit(player1Id, reward1, player1Won ? RANKED_WIN_REASON : RANKED_DEFEAT_REASON, clientMatchId, connection);
-		await credit(player2Id, reward2, player2Won ? RANKED_WIN_REASON : RANKED_DEFEAT_REASON, clientMatchId, connection);
+		const xp1 = await applyXp(player1Id, xpGained1, connection);
+		await applyXp(player2Id, xpGained2, connection);
 
 		await connection.commit();
-		// reward1 est déjà la récompense de player1Id dans tous les cas (victoire
-		// ou défaite) : voir son calcul plus haut. ratingA/ratingB renvoyés pour
-		// que l'appelant (rankedController) puisse faire progresser les quêtes
-		// uniques de palier ranked sans requête supplémentaire.
-		return { reward: reward1, ratingA: newRatingA, ratingB: newRatingB };
+		// xp1 est déjà l'état d'XP/niveau de player1Id dans tous les cas
+		// (victoire ou défaite) : voir son calcul plus haut. ratingA/ratingB
+		// renvoyés pour que l'appelant (rankedController) puisse faire
+		// progresser les quêtes uniques de palier ranked sans requête
+		// supplémentaire.
+		return {
+			xpGained: xpGained1,
+			level: xp1.level,
+			xp: xp1.xp,
+			xpToNext: xp1.xpToNext,
+			rewards: xp1.rewards,
+			ratingA: newRatingA,
+			ratingB: newRatingB,
+		};
 	} catch (error) {
 		await connection.rollback();
 		throw error;

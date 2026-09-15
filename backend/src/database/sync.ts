@@ -26,6 +26,8 @@ const USERS_COLUMNS_TO_ENSURE: { name: string; ddl: string }[] = [
 	{ name: "first_login_reward_claimed_at", ddl: "first_login_reward_claimed_at TIMESTAMP NULL DEFAULT NULL" },
 	{ name: "is_admin", ddl: "is_admin BOOLEAN NOT NULL DEFAULT FALSE" },
 	{ name: "free_packs", ddl: "free_packs INT NOT NULL DEFAULT 0" },
+	{ name: "level", ddl: "level INT NOT NULL DEFAULT 1" },
+	{ name: "xp", ddl: "xp INT NOT NULL DEFAULT 0" },
 ];
 
 const ensureUsersColumns = async (connection: mysql.Connection): Promise<void> => {
@@ -135,6 +137,28 @@ const ensureMatchReportsColumns = async (connection: mysql.Connection): Promise<
 	}
 };
 
+// xp_awarded_player1/2 ajoutées à match_history après sa création initiale
+// (voir schema.sql) — même pattern que ensureSoloStatsColumns. Voir
+// levelModel.ts et rankedModel.confirmMatch.
+const MATCH_HISTORY_COLUMNS_TO_ENSURE: { name: string; ddl: string }[] = [
+	{ name: "xp_awarded_player1", ddl: "xp_awarded_player1 INT NOT NULL DEFAULT 0" },
+	{ name: "xp_awarded_player2", ddl: "xp_awarded_player2 INT NOT NULL DEFAULT 0" },
+];
+
+const ensureMatchHistoryColumns = async (connection: mysql.Connection): Promise<void> => {
+	const [rows] = await connection.query<mysql.RowDataPacket[]>(
+		"SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'match_history'",
+		[DB_NAME],
+	);
+	const existing = new Set(rows.map((row) => row.COLUMN_NAME as string));
+
+	for (const column of MATCH_HISTORY_COLUMNS_TO_ENSURE) {
+		if (existing.has(column.name)) continue;
+		console.log(`→ Ajout de la colonne match_history.${column.name}...`);
+		await connection.query(`ALTER TABLE match_history ADD COLUMN ${column.ddl}`);
+	}
+};
+
 // match_id/match_session_token ajoutées à matchmaking_tickets après sa
 // création initiale (voir schema.sql) — même pattern que
 // ensureSoloStatsColumns. Voir helper/matchSessionToken.ts et TODO.md P9.
@@ -181,6 +205,7 @@ const main = async (): Promise<void> => {
 		await ensureRankedStatsIndex(connection);
 		await ensureSoloStatsColumns(connection);
 		await ensureMatchReportsColumns(connection);
+		await ensureMatchHistoryColumns(connection);
 		await ensureMatchmakingTicketsColumns(connection);
 		console.log("✓ Schéma à jour, aucune donnée existante affectée.");
 	} finally {

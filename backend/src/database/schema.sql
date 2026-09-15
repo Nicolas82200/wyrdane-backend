@@ -58,7 +58,15 @@ CREATE TABLE users (
   -- referralModel), consommé par POST /api/packs/open-owned. Pas de ledger
   -- dédié (contrairement à currency_ledger) : une seule source de valeur, pas
   -- besoin d'audit fin pour l'instant.
-  free_packs INT NOT NULL DEFAULT 0
+  free_packs INT NOT NULL DEFAULT 0,
+  -- Niveau de compte (voir levelModel.ts) : remplace l'ancien barème d'or par
+  -- match classé. XP créditée par match réseau (classé/partie rapide, pas le
+  -- solo), courbe xpToReachNextLevel : +20% par niveau sur le seuil arrondi
+  -- du niveau précédent, 100 XP au niveau 1. Récompense à
+  -- chaque niveau franchi (carte tous les 5, pack tous les 25, or sinon) —
+  -- voir levelModel.rewardKindForLevel.
+  level INT NOT NULL DEFAULT 1,
+  xp INT NOT NULL DEFAULT 0
 );
 
 -- Une ligne par identité liée (Steam aujourd'hui, potentiellement email/Google/Apple
@@ -125,8 +133,8 @@ CREATE TABLE deck_cards (
 
 -- win_streak : victoires classées consécutives en cours pour ce joueur,
 -- remise à 0 par n'importe quelle défaite (voir rankedModel.confirmMatch) —
--- sert de palier au bonus d'or, même barème que l'ancienne récompense solo
--- (voir WIN_STREAK_REWARD_TIERS), distinct de `wins` qui ne fait qu'accumuler.
+-- pur stat d'affichage côté client depuis le retrait du barème d'or par
+-- match (voir levelModel.ts), distinct de `wins` qui ne fait qu'accumuler.
 CREATE TABLE ranked_stats (
   user_id INT PRIMARY KEY,
   mmr INT NOT NULL DEFAULT 1000,
@@ -202,6 +210,12 @@ CREATE TABLE match_history (
   winner_id INT NOT NULL,
   season INT NOT NULL,
   played_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  -- XP brute accordée à chaque joueur pour ce match (voir levelModel,
+  -- rankedModel.confirmMatch) : journalisée ici pour qu'un rapport rejoué
+  -- après confirmation (retry réseau) puisse relire le montant exact sans
+  -- le recalculer, client_match_id étant UNIQUE.
+  xp_awarded_player1 INT NOT NULL DEFAULT 0,
+  xp_awarded_player2 INT NOT NULL DEFAULT 0,
   FOREIGN KEY (player1_id) REFERENCES users(id) ON DELETE CASCADE,
   FOREIGN KEY (player2_id) REFERENCES users(id) ON DELETE CASCADE,
   FOREIGN KEY (winner_id) REFERENCES users(id) ON DELETE CASCADE

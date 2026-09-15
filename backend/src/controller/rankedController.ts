@@ -13,7 +13,7 @@ import { verifyMatchSessionToken } from "../helper/matchSessionToken";
 import { progressForMatch } from "../model/questModel";
 import { progressForMatch as progressWeeklyForMatch } from "../model/weeklyQuestModel";
 import { progressForMatch as progressUniqueForMatch, progressForRankTier } from "../model/uniqueQuestModel";
-import { getBalance, getCreditedAmountForReference } from "../model/currencyModel";
+import { getLevel } from "../model/levelModel";
 import { getUserId } from "../helper/requestUser";
 
 const reportMatch = async (req: Request, res: Response): Promise<void> => {
@@ -75,11 +75,17 @@ const reportMatch = async (req: Request, res: Response): Promise<void> => {
 
 		const existingMatch = await findMatchHistory(clientMatchId);
 		if (existingMatch) {
-			// Le montant exact (vainqueur ou perdant, variable selon la série de
-			// victoires au moment du match) n'est pas recalculable après coup de
-			// façon fiable : on relit ce que confirmMatch a réellement crédité.
-			const reward = await getCreditedAmountForReference(userId, clientMatchId);
-			res.status(200).json({ status: "confirmed", match: existingMatch, reward, balance: await getBalance(userId) });
+			// L'XP gagnée à CE match est déjà journalisée sur match_history
+			// (xp_awarded_player1/2, voir rankedModel.confirmMatch) : pas besoin de
+			// la recalculer. Les récompenses de niveau éventuellement débloquées
+			// par ce match, elles, ne sont pas rejouées ici (déjà accordées une
+			// seule fois lors du confirmMatch initial) — seul l'état courant de
+			// niveau/XP est relu.
+			const xpGained = existingMatch.player1_id === userId
+				? existingMatch.xp_awarded_player1
+				: existingMatch.xp_awarded_player2;
+			const level = await getLevel(userId);
+			res.status(200).json({ status: "confirmed", match: existingMatch, xpGained, ...level, rewards: [] });
 			return;
 		}
 
@@ -109,7 +115,12 @@ const reportMatch = async (req: Request, res: Response): Promise<void> => {
 			return;
 		}
 
-		const { reward, ratingA, ratingB } = await confirmMatch(clientMatchId, userId, opponentId, winnerId);
+		const { xpGained, level, xp, xpToNext, rewards, ratingA, ratingB } = await confirmMatch(
+			clientMatchId,
+			userId,
+			opponentId,
+			winnerId,
+		);
 		// Une fois par joueur, jamais deux fois (confirmMatch ne s'exécute qu'une
 		// seule fois par match — voir le court-circuit findMatchHistory plus haut).
 		// Chaque joueur ne fait progresser ses quêtes de race qu'avec les données
@@ -133,7 +144,7 @@ const reportMatch = async (req: Request, res: Response): Promise<void> => {
 		// (confirmMatch(clientMatchId, userId, opponentId, ...) → player1=userId).
 		await progressForRankTier(userId, ratingA);
 		await progressForRankTier(opponentId, ratingB);
-		res.status(200).json({ status: "confirmed", reward, balance: await getBalance(userId) });
+		res.status(200).json({ status: "confirmed", xpGained, level, xp, xpToNext, rewards });
 	} catch (error) {
 		console.error(error);
 		res.status(500).json({ message: "Server error" });

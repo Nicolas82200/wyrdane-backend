@@ -7,10 +7,22 @@ vi.mock("./db", () => ({
 	},
 }));
 
+// levelModel a ses propres tests dédiés (levelModel.test.ts) : ici on ne
+// vérifie que le câblage (confirmMatch appelle applyXp avec le bon montant
+// pour chaque joueur, et renvoie l'état renvoyé par applyXp pour player1Id),
+// pas la logique de récompense par niveau elle-même.
+vi.mock("./levelModel", () => ({
+	applyXp: vi.fn(),
+	XP_WIN_NETWORK: 50,
+	XP_LOSS_NETWORK: 15,
+}));
+
 import db from "./db";
+import { applyXp } from "./levelModel";
 import { confirmMatch } from "./rankedModel";
 
 const mockedDb = db as unknown as { query: ReturnType<typeof vi.fn>; getConnection: ReturnType<typeof vi.fn> };
+const mockedApplyXp = applyXp as ReturnType<typeof vi.fn>;
 
 interface StatsRow {
 	user_id: number;
@@ -18,11 +30,10 @@ interface StatsRow {
 	win_streak: number;
 }
 
-// connection.query générique : la SELECT ... FOR UPDATE renvoie les lignes
-// fournies (mmr/win_streak de départ des deux joueurs), tout le reste
-// (INSERT ranked_stats, UPDATE, INSERT match_history, credit()...) répond un
-// succès générique — seuls les appels UPDATE/INSERT currency_ledger sont
-// inspectés individuellement dans les tests via connection.query.mock.calls.
+// connection.query générique : la SELECT ... FOR UPDATE sur ranked_stats
+// renvoie les lignes fournies (mmr/win_streak de départ des deux joueurs),
+// tout le reste (INSERT ranked_stats, UPDATE, INSERT match_history...)
+// répond un succès générique.
 const makeConnection = (statsRows: StatsRow[]) => {
 	const connection = {
 		query: vi.fn(),
@@ -40,88 +51,80 @@ const makeConnection = (statsRows: StatsRow[]) => {
 	return connection;
 };
 
-// Trouve l'appel UPDATE ranked_stats dont le dernier paramètre lié (user_id)
-// correspond à userId, pour vérifier le win_streak (4e paramètre) et les
-// wins/losses appliqués à CE joueur précisément (les deux joueurs partagent
-// le même texte de requête).
-const findRankedStatsUpdate = (connection: { query: ReturnType<typeof vi.fn> }, userId: number) =>
+const findMatchHistoryInsert = (connection: { query: ReturnType<typeof vi.fn> }) =>
 	connection.query.mock.calls.find(
-		([sql, params]) =>
-			typeof sql === "string" &&
-			sql.startsWith("UPDATE ranked_stats") &&
-			Array.isArray(params) &&
-			params[4] === userId,
+		([sql]) => typeof sql === "string" && sql.includes("INSERT INTO match_history"),
 	)?.[1] as unknown[] | undefined;
 
-const findLedgerInsert = (connection: { query: ReturnType<typeof vi.fn> }, userId: number) =>
-	connection.query.mock.calls.find(
-		([sql, params]) =>
-			typeof sql === "string" &&
-			sql.includes("INSERT INTO currency_ledger") &&
-			Array.isArray(params) &&
-			params[0] === userId,
-	)?.[1] as unknown[] | undefined;
+const defaultLevelResult = (level: number) => ({ level, xp: 0, xpToNext: 100, rewards: [] });
 
 describe("confirmMatch", () => {
-	beforeEach(() => vi.clearAllMocks());
+	beforeEach(() => {
+		vi.clearAllMocks();
+		mockedApplyXp.mockImplementation((userId: number) => Promise.resolve(defaultLevelResult(1)));
+	});
 
-	it("credits the base win reward (10) for a fresh win streak, and a flat 5 to the loser", async () => {
+	it("awards XP_WIN_NETWORK to the winner and XP_LOSS_NETWORK to the loser", async () => {
 		const connection = makeConnection([
 			{ user_id: 1, mmr: 1000, win_streak: 0 },
 			{ user_id: 2, mmr: 1000, win_streak: 0 },
 		]);
 		mockedDb.getConnection.mockResolvedValueOnce(connection);
 
-		const { reward } = await confirmMatch("m1", 1, 2, 1);
+		const { xpGained } = await confirmMatch("m1", 1, 2, 1);
 
-		expect(reward).toBe(10);
-		expect(findLedgerInsert(connection, 1)).toEqual([1, 10, "match_win_ranked", "m1"]);
-		expect(findLedgerInsert(connection, 2)).toEqual([2, 5, "match_loss_ranked", "m1"]);
-		expect(findRankedStatsUpdate(connection, 1)?.[3]).toBe(1); // new win_streak
-		expect(findRankedStatsUpdate(connection, 2)?.[3]).toBe(0);
-		expect(connection.commit).toHaveBeenCalledTimes(1);
+		expect(xpGained).toBe(50);
+		expect(mockedApplyXp).toHaveBeenCalledWith(1, 50, connection);
+		expect(mockedApplyXp).toHaveBeenCalledWith(2, 15, connection);
 	});
 
-	it("scales the winner's reward to 15 gold once their streak reaches 3", async () => {
+	it("returns the caller's own XP result (not the opponent's) when player1 is the loser", async () => {
 		const connection = makeConnection([
-			{ user_id: 1, mmr: 1000, win_streak: 2 },
+			{ user_id: 1, mmr: 1000, win_streak: 0 },
 			{ user_id: 2, mmr: 1000, win_streak: 0 },
 		]);
 		mockedDb.getConnection.mockResolvedValueOnce(connection);
 
-		const { reward } = await confirmMatch("m2", 1, 2, 1);
+		const { xpGained } = await confirmMatch("m2", 1, 2, 2);
 
-		expect(reward).toBe(15);
-		expect(findLedgerInsert(connection, 1)).toEqual([1, 15, "match_win_ranked", "m2"]);
+		expect(xpGained).toBe(15);
+		expect(mockedApplyXp).toHaveBeenCalledWith(1, 15, connection);
+		expect(mockedApplyXp).toHaveBeenCalledWith(2, 50, connection);
 	});
 
-	it("scales the winner's reward to 20 gold at streak 5 and 25 at streak 7+", async () => {
-		const connectionAtFive = makeConnection([
-			{ user_id: 1, mmr: 1000, win_streak: 4 },
-			{ user_id: 2, mmr: 1000, win_streak: 0 },
-		]);
-		mockedDb.getConnection.mockResolvedValueOnce(connectionAtFive);
-		expect((await confirmMatch("m3", 1, 2, 1)).reward).toBe(20);
-
-		const connectionAtNine = makeConnection([
-			{ user_id: 1, mmr: 1000, win_streak: 8 },
-			{ user_id: 2, mmr: 1000, win_streak: 0 },
-		]);
-		mockedDb.getConnection.mockResolvedValueOnce(connectionAtNine);
-		expect((await confirmMatch("m4", 1, 2, 1)).reward).toBe(25);
-	});
-
-	it("returns the caller's own reward (not the winner's) when player1 is the loser", async () => {
+	it("journals the raw XP awarded to each player on match_history", async () => {
 		const connection = makeConnection([
-			{ user_id: 1, mmr: 1000, win_streak: 4 },
+			{ user_id: 1, mmr: 1000, win_streak: 0 },
 			{ user_id: 2, mmr: 1000, win_streak: 0 },
 		]);
 		mockedDb.getConnection.mockResolvedValueOnce(connection);
 
-		const { reward } = await confirmMatch("m5", 1, 2, 2);
+		await confirmMatch("m3", 1, 2, 1);
 
-		expect(reward).toBe(5);
-		expect(findLedgerInsert(connection, 2)).toEqual([2, 10, "match_win_ranked", "m5"]);
+		const params = findMatchHistoryInsert(connection);
+		expect(params).toEqual(["m3", 1, 2, 1, 1, 50, 15]);
+	});
+
+	it("surfaces the level/xp/rewards returned by applyXp for player1Id", async () => {
+		const connection = makeConnection([
+			{ user_id: 1, mmr: 1000, win_streak: 0 },
+			{ user_id: 2, mmr: 1000, win_streak: 0 },
+		]);
+		mockedDb.getConnection.mockResolvedValueOnce(connection);
+		mockedApplyXp.mockImplementation((userId: number) =>
+			Promise.resolve(
+				userId === 1
+					? { level: 5, xp: 3, xpToNext: 140, rewards: [{ level: 5, type: "card" }] }
+					: defaultLevelResult(1),
+			),
+		);
+
+		const result = await confirmMatch("m4", 1, 2, 1);
+
+		expect(result.level).toBe(5);
+		expect(result.xp).toBe(3);
+		expect(result.xpToNext).toBe(140);
+		expect(result.rewards).toEqual([{ level: 5, type: "card" }]);
 	});
 
 	it("resets the loser's win streak to 0 even if they had one going into the match", async () => {
@@ -131,9 +134,16 @@ describe("confirmMatch", () => {
 		]);
 		mockedDb.getConnection.mockResolvedValueOnce(connection);
 
-		await confirmMatch("m6", 1, 2, 2);
+		await confirmMatch("m5", 1, 2, 2);
 
-		expect(findRankedStatsUpdate(connection, 1)?.[3]).toBe(0);
+		const update = connection.query.mock.calls.find(
+			([sql, params]) =>
+				typeof sql === "string" &&
+				sql.startsWith("UPDATE ranked_stats") &&
+				Array.isArray(params) &&
+				params[4] === 1,
+		)?.[1] as unknown[];
+		expect(update?.[3]).toBe(0);
 	});
 
 	it("rolls back and rethrows if a query fails mid-transaction", async () => {
@@ -146,7 +156,7 @@ describe("confirmMatch", () => {
 		};
 		mockedDb.getConnection.mockResolvedValueOnce(connection);
 
-		await expect(confirmMatch("m7", 1, 2, 1)).rejects.toThrow("db exploded");
+		await expect(confirmMatch("m6", 1, 2, 1)).rejects.toThrow("db exploded");
 
 		expect(connection.rollback).toHaveBeenCalledTimes(1);
 		expect(connection.commit).not.toHaveBeenCalled();

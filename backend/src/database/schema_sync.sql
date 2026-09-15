@@ -117,6 +117,8 @@ CREATE TABLE IF NOT EXISTS match_history (
   winner_id INT NOT NULL,
   season INT NOT NULL,
   played_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  xp_awarded_player1 INT NOT NULL DEFAULT 0,
+  xp_awarded_player2 INT NOT NULL DEFAULT 0,
   FOREIGN KEY (player1_id) REFERENCES users(id) ON DELETE CASCADE,
   FOREIGN KEY (player2_id) REFERENCES users(id) ON DELETE CASCADE,
   FOREIGN KEY (winner_id) REFERENCES users(id) ON DELETE CASCADE
