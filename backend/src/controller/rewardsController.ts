@@ -5,6 +5,8 @@ import { incrementResult } from "../model/soloStatsModel";
 import { progressForMatch } from "../model/questModel";
 import { progressForMatch as progressWeeklyForMatch } from "../model/weeklyQuestModel";
 import { progressForMatch as progressUniqueForMatch } from "../model/uniqueQuestModel";
+import { progressForMatch as progressOnboardingForMatch } from "../model/onboardingQuestModel";
+import { getLevel } from "../model/levelModel";
 import { getUserId } from "../helper/requestUser";
 import { sanitizeCardsPlayedByRace, sanitizeDeckRaces } from "../helper/matchPayload";
 
@@ -39,6 +41,8 @@ const reportSoloMatch = async (req: Request, res: Response): Promise<void> => {
 		await progressForMatch(userId, "solo", won, { cardsPlayedByRace, deckRaces });
 		await progressWeeklyForMatch(userId, "solo", won, { cardsPlayedByRace, deckRaces });
 		await progressUniqueForMatch(userId, "solo", won, { deckRaces });
+		const { level } = await getLevel(userId);
+		await progressOnboardingForMatch(userId, level, "solo", won);
 
 		res.status(200).json({ credited: false, reward: 0, winStreak, balance: await getBalance(userId) });
 	} catch (error) {

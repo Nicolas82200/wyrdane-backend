@@ -3,6 +3,7 @@ import { Router } from "express";
 import { getMyDailyQuests, claimMyQuest } from "../controller/questController";
 import { getMyWeeklyQuests, claimMyWeeklyQuest } from "../controller/weeklyQuestController";
 import { getMyUniqueQuests, claimMyUniqueQuest } from "../controller/uniqueQuestController";
+import { getMyOnboardingQuests, claimMyOnboardingQuest } from "../controller/onboardingQuestController";
 import rateLimit from "../middleware/rateLimit";
 
 const router = Router();
@@ -14,6 +15,8 @@ router.get("/weekly", getMyWeeklyQuests);
 router.post("/weekly/:id/claim", claimLimit, claimMyWeeklyQuest);
 router.get("/unique", getMyUniqueQuests);
 router.post("/unique/:id/claim", claimLimit, claimMyUniqueQuest);
+router.get("/onboarding", getMyOnboardingQuests);
+router.post("/onboarding/:id/claim", claimLimit, claimMyOnboardingQuest);
 router.post("/:id/claim", claimLimit, claimMyQuest);
 
 export default router;
