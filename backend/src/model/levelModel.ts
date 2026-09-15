@@ -52,7 +52,10 @@ const CARD_RARITY_BY_LEVEL_MOD_20: Record<number, string> = {
 };
 
 // Or accordé aux niveaux qui n'offrent ni carte ni pack.
-const GOLD_REWARD_PER_LEVEL = 20;
+const GOLD_REWARD_PER_LEVEL = 50;
+// Or accordé EN PLUS de la carte/du pack aux paliers multiples de 5/25.
+const GOLD_BONUS_PER_CARD_LEVEL = 100;
+const GOLD_BONUS_PER_PACK_LEVEL = 200;
 
 type LevelRewardKind = "card" | "pack" | "gold";
 
@@ -89,7 +92,10 @@ const fetchRandomCardByRarity = async (
 
 // Octroie la récompense d'un niveau franchi. Une carte déjà possédée au
 // plafond (MAX_COPIES_PER_CARD) est convertie en or (même logique de dust que
-// packModel.drawAndGrantCards) plutôt que perdue silencieusement.
+// packModel.drawAndGrantCards) plutôt que perdue silencieusement. Les paliers
+// carte/pack créditent en plus un bonus d'or fixe (GOLD_BONUS_PER_*_LEVEL),
+// cumulé avec un éventuel dust — `gold` sur le reward reflète toujours le
+// montant total réellement crédité, pas seulement le bonus.
 const grantLevelReward = async (
 	userId: number,
 	level: number,
@@ -99,24 +105,27 @@ const grantLevelReward = async (
 
 	if (kind === "pack") {
 		await creditFreePacks(userId, 1, connection);
-		return { level, type: "pack" };
+		await credit(userId, GOLD_BONUS_PER_PACK_LEVEL, "level_reward_gold", `level_${level}`, connection);
+		return { level, type: "pack", gold: GOLD_BONUS_PER_PACK_LEVEL };
 	}
 
 	if (kind === "card") {
 		const card = await fetchRandomCardByRarity(rarity!, connection);
 		if (!card) {
-			// Repli défensif : aucune carte de cette rareté en base.
-			await credit(userId, GOLD_REWARD_PER_LEVEL, "level_reward_gold", `level_${level}`, connection);
-			return { level, type: "gold", gold: GOLD_REWARD_PER_LEVEL };
+			// Repli défensif : aucune carte de cette rareté en base — le bonus
+			// du palier remplace alors entièrement la récompense.
+			await credit(userId, GOLD_BONUS_PER_CARD_LEVEL, "level_reward_gold", `level_${level}`, connection);
+			return { level, type: "gold", gold: GOLD_BONUS_PER_CARD_LEVEL };
 		}
 		const alreadyOwned = await getOwnedQuantity(userId, card.id, connection);
 		if (alreadyOwned >= MAX_COPIES_PER_CARD) {
-			const gold = DUST_VALUE_BY_RARITY[card.rarity] ?? 0;
+			const gold = (DUST_VALUE_BY_RARITY[card.rarity] ?? 0) + GOLD_BONUS_PER_CARD_LEVEL;
 			await credit(userId, gold, "level_reward_dust", `level_${level}`, connection);
 			return { level, type: "card", card, dusted: true, gold };
 		}
 		await grantCard(userId, card.id, 1, connection);
-		return { level, type: "card", card, dusted: false };
+		await credit(userId, GOLD_BONUS_PER_CARD_LEVEL, "level_reward_gold", `level_${level}`, connection);
+		return { level, type: "card", card, dusted: false, gold: GOLD_BONUS_PER_CARD_LEVEL };
 	}
 
 	await credit(userId, GOLD_REWARD_PER_LEVEL, "level_reward_gold", `level_${level}`, connection);
