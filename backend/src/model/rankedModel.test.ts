@@ -8,21 +8,24 @@ vi.mock("./db", () => ({
 }));
 
 // levelModel a ses propres tests dédiés (levelModel.test.ts) : ici on ne
-// vérifie que le câblage (confirmMatch appelle applyXp avec le bon montant
-// pour chaque joueur, et renvoie l'état renvoyé par applyXp pour player1Id),
-// pas la logique de récompense par niveau elle-même.
+// vérifie que le câblage (confirmMatch appelle winXpForStreak avec la série
+// déjà incrémentée du vainqueur puis applyXp avec le montant renvoyé, et
+// renvoie l'état renvoyé par applyXp pour player1Id), pas la logique de
+// multiplicateur par série elle-même — le mock ci-dessous ne réplique le
+// palier (streak >= 3) que pour distinguer les deux cas dans les tests.
 vi.mock("./levelModel", () => ({
 	applyXp: vi.fn(),
-	XP_WIN_NETWORK: 50,
 	XP_LOSS_NETWORK: 15,
+	winXpForStreak: vi.fn((streak: number) => (streak >= 3 ? 75 : 50)),
 }));
 
 import db from "./db";
-import { applyXp } from "./levelModel";
+import { applyXp, winXpForStreak } from "./levelModel";
 import { confirmMatch } from "./rankedModel";
 
 const mockedDb = db as unknown as { query: ReturnType<typeof vi.fn>; getConnection: ReturnType<typeof vi.fn> };
 const mockedApplyXp = applyXp as ReturnType<typeof vi.fn>;
+const mockedWinXpForStreak = winXpForStreak as ReturnType<typeof vi.fn>;
 
 interface StatsRow {
 	user_id: number;
@@ -125,6 +128,22 @@ describe("confirmMatch", () => {
 		expect(result.xp).toBe(3);
 		expect(result.xpToNext).toBe(140);
 		expect(result.rewards).toEqual([{ level: 5, type: "card" }]);
+	});
+
+	it("passes the winner's incremented streak to winXpForStreak, not the loser's", async () => {
+		const connection = makeConnection([
+			{ user_id: 1, mmr: 1000, win_streak: 4 },
+			{ user_id: 2, mmr: 1000, win_streak: 6 },
+		]);
+		mockedDb.getConnection.mockResolvedValueOnce(connection);
+
+		const { xpGained } = await confirmMatch("m5b", 1, 2, 1);
+
+		expect(mockedWinXpForStreak).toHaveBeenCalledWith(5); // 4 + 1
+		expect(mockedWinXpForStreak).not.toHaveBeenCalledWith(0);
+		expect(xpGained).toBe(75); // streak 5 >= 3 dans le mock
+		expect(mockedApplyXp).toHaveBeenCalledWith(1, 75, connection);
+		expect(mockedApplyXp).toHaveBeenCalledWith(2, 15, connection);
 	});
 
 	it("resets the loser's win streak to 0 even if they had one going into the match", async () => {

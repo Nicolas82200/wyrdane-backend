@@ -1,7 +1,7 @@
 import type { RowDataPacket } from "mysql2";
 import db from "./db";
 import { calculateElo } from "../helper/eloHelper";
-import { applyXp, XP_WIN_NETWORK, XP_LOSS_NETWORK } from "./levelModel";
+import { applyXp, XP_LOSS_NETWORK, winXpForStreak } from "./levelModel";
 import type { LevelReward } from "./levelModel";
 
 const CURRENT_SEASON = 1;
@@ -98,10 +98,13 @@ const createReport = async (
 
 // Valide le match : calcule le nouveau MMR des deux joueurs, met à jour leur
 // série de victoires et crédite chacun en XP de compte (voir levelModel,
-// XP_WIN_NETWORK/XP_LOSS_NETWORK — remplace l'ancien barème d'or par match),
-// en transaction pour ne jamais désynchroniser stats/historique/XP. Renvoie
-// l'XP gagné et le nouvel état de niveau de player1Id (l'appelant côté
-// contrôleur, voir rankedController.reportMatch).
+// winXpForStreak/XP_LOSS_NETWORK — remplace l'ancien barème d'or par match),
+// en transaction pour ne jamais désynchroniser stats/historique/XP. Le
+// vainqueur reçoit un multiplicateur d'XP selon sa série de victoires en
+// cours (voir WIN_STREAK_XP_MULTIPLIER_TIERS dans levelModel), jamais le
+// perdant (sa série retombe à 0). Renvoie l'XP gagné et le nouvel état de
+// niveau de player1Id (l'appelant côté contrôleur, voir
+// rankedController.reportMatch).
 const confirmMatch = async (
 	clientMatchId: string,
 	player1Id: number,
@@ -145,8 +148,8 @@ const confirmMatch = async (
 		const player2Won = winnerId === player2Id;
 		const newStreak1 = player1Won ? (stats.get(player1Id)?.win_streak ?? 0) + 1 : 0;
 		const newStreak2 = player2Won ? (stats.get(player2Id)?.win_streak ?? 0) + 1 : 0;
-		const xpGained1 = player1Won ? XP_WIN_NETWORK : XP_LOSS_NETWORK;
-		const xpGained2 = player2Won ? XP_WIN_NETWORK : XP_LOSS_NETWORK;
+		const xpGained1 = player1Won ? winXpForStreak(newStreak1) : XP_LOSS_NETWORK;
+		const xpGained2 = player2Won ? winXpForStreak(newStreak2) : XP_LOSS_NETWORK;
 
 		await connection.query(
 			"UPDATE ranked_stats SET mmr = ?, wins = wins + ?, losses = losses + ?, win_streak = ? WHERE user_id = ?",

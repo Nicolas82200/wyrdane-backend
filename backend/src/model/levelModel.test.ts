@@ -57,12 +57,12 @@ const makeConnection = (
 };
 
 describe("xpToReachNextLevel", () => {
-	it("grows 20% per level over the previous (rounded) threshold, starting at 100", () => {
-		expect(xpToReachNextLevel(1)).toBe(100);
-		expect(xpToReachNextLevel(2)).toBe(120); // round(100 * 1.2)
-		expect(xpToReachNextLevel(3)).toBe(144); // round(120 * 1.2)
-		expect(xpToReachNextLevel(9)).toBe(432);
-		expect(xpToReachNextLevel(24)).toBe(6647);
+	it("grows linearly, +5 XP per level over 100", () => {
+		expect(xpToReachNextLevel(1)).toBe(105);
+		expect(xpToReachNextLevel(2)).toBe(110);
+		expect(xpToReachNextLevel(3)).toBe(115);
+		expect(xpToReachNextLevel(9)).toBe(145);
+		expect(xpToReachNextLevel(24)).toBe(220);
 	});
 });
 
@@ -86,9 +86,24 @@ describe("applyXp", () => {
 		const result = await applyXp(1, 50, connection);
 
 		expect(result.level).toBe(2);
-		expect(result.xp).toBe(40); // 90 + 50 - 100 (xpToReachNextLevel(1))
-		expect(mockedCredit).toHaveBeenCalledWith(1, 20, "level_reward_gold", "level_2", connection);
-		expect(result.rewards).toEqual([{ level: 2, type: "gold", gold: 20 }]);
+		expect(result.xp).toBe(35); // 90 + 50 - 105 (xpToReachNextLevel(1))
+		expect(mockedCredit).toHaveBeenCalledWith(1, 50, "level_reward_gold", "level_2", connection); // 2e palier d'or (level % 5 === 2)
+		expect(result.rewards).toEqual([{ level: 2, type: "gold", gold: 50 }]);
+	});
+
+	it("ramps the gold-only reward 25/50/75/100 across a streak, then resets to 25 after a card level", async () => {
+		mockedGetOwnedQuantity.mockResolvedValue(0);
+		const cardsByRarity = { Commune: [{ id: 42, rarity: "Commune" }] };
+		const goldRewards: number[] = [];
+
+		for (let startLevel = 0; startLevel <= 5; startLevel++) {
+			const connection = makeConnection({ level: startLevel, xp: 0 }, cardsByRarity);
+			const result = await applyXp(9, xpToReachNextLevel(startLevel), connection);
+			const reward = result.rewards[0];
+			goldRewards.push(reward.type === "gold" ? reward.gold! : -1); // -1 = palier carte (level 5)
+		}
+
+		expect(goldRewards).toEqual([25, 50, 75, 100, -1, 25]);
 	});
 
 	it("grants a random Commune card at level 5", async () => {
@@ -97,8 +112,9 @@ describe("applyXp", () => {
 
 		expect(result.level).toBe(5);
 		expect(mockedGrantCard).toHaveBeenCalledWith(2, 7, 1, connection);
+		expect(mockedCredit).toHaveBeenCalledWith(2, 100, "level_reward_gold", "level_5", connection);
 		expect(result.rewards).toEqual([
-			{ level: 5, type: "card", card: { id: 7, rarity: "Commune" }, dusted: false },
+			{ level: 5, type: "card", card: { id: 7, rarity: "Commune" }, dusted: false, gold: 100 },
 		]);
 	});
 
@@ -132,7 +148,8 @@ describe("applyXp", () => {
 		expect(result.level).toBe(25);
 		expect(mockedCreditFreePacks).toHaveBeenCalledWith(3, 1, connection);
 		expect(mockedGrantCard).not.toHaveBeenCalled();
-		expect(result.rewards).toEqual([{ level: 25, type: "pack" }]);
+		expect(mockedCredit).toHaveBeenCalledWith(3, 200, "level_reward_gold", "level_25", connection);
+		expect(result.rewards).toEqual([{ level: 25, type: "pack", gold: 200 }]);
 	});
 
 	it("dusts a card already owned at MAX_COPIES_PER_CARD instead of granting a 5th copy", async () => {
@@ -142,9 +159,9 @@ describe("applyXp", () => {
 		const result = await applyXp(4, xpToReachNextLevel(9), connection);
 
 		expect(mockedGrantCard).not.toHaveBeenCalled();
-		expect(mockedCredit).toHaveBeenCalledWith(4, 50, "level_reward_dust", "level_10", connection);
+		expect(mockedCredit).toHaveBeenCalledWith(4, 150, "level_reward_dust", "level_10", connection); // 50 (dust Rare) + 100 (bonus palier)
 		expect(result.rewards).toEqual([
-			{ level: 10, type: "card", card: { id: 8, rarity: "Rare" }, dusted: true, gold: 50 },
+			{ level: 10, type: "card", card: { id: 8, rarity: "Rare" }, dusted: true, gold: 150 },
 		]);
 	});
 
@@ -153,14 +170,14 @@ describe("applyXp", () => {
 		const result = await applyXp(5, xpToReachNextLevel(14), connection);
 
 		expect(result.level).toBe(15);
-		expect(mockedCredit).toHaveBeenCalledWith(5, 20, "level_reward_gold", "level_15", connection);
-		expect(result.rewards).toEqual([{ level: 15, type: "gold", gold: 20 }]);
+		expect(mockedCredit).toHaveBeenCalledWith(5, 100, "level_reward_gold", "level_15", connection);
+		expect(result.rewards).toEqual([{ level: 15, type: "gold", gold: 100 }]);
 	});
 
 	it("grants a reward for every level crossed in a single large XP gain", async () => {
 		const connection = makeConnection({ level: 1, xp: 0 });
-		// xpToReachNextLevel(1)=100, (2)=120 : 220 XP franchit pile les niveaux 2 et 3.
-		const result = await applyXp(6, 220, connection);
+		// xpToReachNextLevel(1)=105, (2)=110 : 215 XP franchit pile les niveaux 2 et 3.
+		const result = await applyXp(6, 215, connection);
 
 		expect(result.level).toBe(3);
 		expect(result.xp).toBe(0);

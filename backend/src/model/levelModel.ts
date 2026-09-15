@@ -13,20 +13,31 @@ import type { Cards } from "../types";
 const XP_WIN_NETWORK = 50;
 const XP_LOSS_NETWORK = 15;
 
-// XP requise pour passer du niveau `level` à `level + 1` : chaque niveau
-// demande 20 % d'XP de plus que le seuil du niveau précédent (arrondi à
-// l'entier le plus proche à CHAQUE niveau, pas recalculé depuis la base à
-// chaque appel — le seuil du niveau 10 doit être +20 % du seuil arrondi du
-// niveau 9, pas 1.2^9 fois la base). Niveau 1 : 100 XP.
+// XP requise pour passer du niveau `level` à `level + 1` : croissance
+// linéaire, +5 XP de palier par niveau (105 au niveau 1, 110 au niveau 2,
+// 115 au niveau 3...). Contrairement à l'ancienne courbe géométrique, ne
+// dépend pas du seuil précédent — calcul direct, pas de dérive d'arrondi.
 const XP_CURVE_BASE = 100;
-const XP_CURVE_GROWTH = 1.2;
+const XP_CURVE_STEP = 5;
 
-const xpToReachNextLevel = (level: number): number => {
-	let xp = XP_CURVE_BASE;
-	for (let i = 1; i < level; i++) {
-		xp = Math.round(xp * XP_CURVE_GROWTH);
-	}
-	return xp;
+const xpToReachNextLevel = (level: number): number => XP_CURVE_BASE + XP_CURVE_STEP * level;
+
+// Multiplicateur appliqué à XP_WIN_NETWORK selon la série de victoires en
+// cours (ranked_stats.win_streak, incrémentée AVANT cet appel côté
+// rankedModel.confirmMatch) : palier atteint à 3/5/7 victoires d'affilée,
+// jamais appliqué à une défaite (streak retombe à 0). Remplace l'ancien
+// barème d'or par palier (WIN_STREAK_REWARD_TIERS) sur le même principe,
+// mais agit sur l'XP plutôt que sur l'or directement.
+const WIN_STREAK_XP_MULTIPLIER_TIERS: { minStreak: number; multiplier: number }[] = [
+	{ minStreak: 7, multiplier: 1.75 },
+	{ minStreak: 5, multiplier: 1.5 },
+	{ minStreak: 3, multiplier: 1.25 },
+	{ minStreak: 0, multiplier: 1 },
+];
+
+const winXpForStreak = (streak: number): number => {
+	const tier = WIN_STREAK_XP_MULTIPLIER_TIERS.find((t) => streak >= t.minStreak);
+	return Math.round(XP_WIN_NETWORK * (tier?.multiplier ?? 1));
 };
 
 // Rareté de la carte offerte tous les 5 niveaux, cyclique sur 20 niveaux
@@ -40,8 +51,22 @@ const CARD_RARITY_BY_LEVEL_MOD_20: Record<number, string> = {
 	0: "Légendaire",
 };
 
-// Or accordé aux niveaux qui n'offrent ni carte ni pack.
-const GOLD_REWARD_PER_LEVEL = 20;
+// Or accordé aux niveaux qui n'offrent ni carte ni pack : monte à chaque
+// niveau au sein d'une série de 4 (25/50/75/100), puis retombe à 25 dès
+// qu'un niveau a offert autre chose que de l'or (carte ou pack, toujours
+// multiple de 5) — level % 5 vaut 1/2/3/4 sur ces niveaux-là, jamais 0,
+// donc la position dans la série se lit directement dessus.
+const GOLD_TIER_BY_LEVEL_MOD_5: Record<number, number> = {
+	1: 25,
+	2: 50,
+	3: 75,
+	4: 100,
+};
+const goldRewardForLevel = (level: number): number => GOLD_TIER_BY_LEVEL_MOD_5[level % 5] ?? 100;
+
+// Or accordé EN PLUS de la carte/du pack aux paliers multiples de 5/25.
+const GOLD_BONUS_PER_CARD_LEVEL = 100;
+const GOLD_BONUS_PER_PACK_LEVEL = 200;
 
 type LevelRewardKind = "card" | "pack" | "gold";
 
@@ -78,7 +103,10 @@ const fetchRandomCardByRarity = async (
 
 // Octroie la récompense d'un niveau franchi. Une carte déjà possédée au
 // plafond (MAX_COPIES_PER_CARD) est convertie en or (même logique de dust que
-// packModel.drawAndGrantCards) plutôt que perdue silencieusement.
+// packModel.drawAndGrantCards) plutôt que perdue silencieusement. Les paliers
+// carte/pack créditent en plus un bonus d'or fixe (GOLD_BONUS_PER_*_LEVEL),
+// cumulé avec un éventuel dust — `gold` sur le reward reflète toujours le
+// montant total réellement crédité, pas seulement le bonus.
 const grantLevelReward = async (
 	userId: number,
 	level: number,
@@ -88,28 +116,32 @@ const grantLevelReward = async (
 
 	if (kind === "pack") {
 		await creditFreePacks(userId, 1, connection);
-		return { level, type: "pack" };
+		await credit(userId, GOLD_BONUS_PER_PACK_LEVEL, "level_reward_gold", `level_${level}`, connection);
+		return { level, type: "pack", gold: GOLD_BONUS_PER_PACK_LEVEL };
 	}
 
 	if (kind === "card") {
 		const card = await fetchRandomCardByRarity(rarity!, connection);
 		if (!card) {
-			// Repli défensif : aucune carte de cette rareté en base.
-			await credit(userId, GOLD_REWARD_PER_LEVEL, "level_reward_gold", `level_${level}`, connection);
-			return { level, type: "gold", gold: GOLD_REWARD_PER_LEVEL };
+			// Repli défensif : aucune carte de cette rareté en base — le bonus
+			// du palier remplace alors entièrement la récompense.
+			await credit(userId, GOLD_BONUS_PER_CARD_LEVEL, "level_reward_gold", `level_${level}`, connection);
+			return { level, type: "gold", gold: GOLD_BONUS_PER_CARD_LEVEL };
 		}
 		const alreadyOwned = await getOwnedQuantity(userId, card.id, connection);
 		if (alreadyOwned >= MAX_COPIES_PER_CARD) {
-			const gold = DUST_VALUE_BY_RARITY[card.rarity] ?? 0;
+			const gold = (DUST_VALUE_BY_RARITY[card.rarity] ?? 0) + GOLD_BONUS_PER_CARD_LEVEL;
 			await credit(userId, gold, "level_reward_dust", `level_${level}`, connection);
 			return { level, type: "card", card, dusted: true, gold };
 		}
 		await grantCard(userId, card.id, 1, connection);
-		return { level, type: "card", card, dusted: false };
+		await credit(userId, GOLD_BONUS_PER_CARD_LEVEL, "level_reward_gold", `level_${level}`, connection);
+		return { level, type: "card", card, dusted: false, gold: GOLD_BONUS_PER_CARD_LEVEL };
 	}
 
-	await credit(userId, GOLD_REWARD_PER_LEVEL, "level_reward_gold", `level_${level}`, connection);
-	return { level, type: "gold", gold: GOLD_REWARD_PER_LEVEL };
+	const gold = goldRewardForLevel(level);
+	await credit(userId, gold, "level_reward_gold", `level_${level}`, connection);
+	return { level, type: "gold", gold };
 };
 
 const getLevel = async (userId: number): Promise<{ level: number; xp: number; xpToNext: number }> => {
@@ -173,6 +205,7 @@ export {
 	XP_WIN_NETWORK,
 	XP_LOSS_NETWORK,
 	xpToReachNextLevel,
+	winXpForStreak,
 	getLevel,
 	applyXp,
 	addXp,
