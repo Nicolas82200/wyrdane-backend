@@ -14,12 +14,12 @@ const XP_WIN_NETWORK = 50;
 const XP_LOSS_NETWORK = 15;
 
 // XP requise pour passer du niveau `level` à `level + 1` : chaque niveau
-// demande 20 % d'XP de plus que le seuil du niveau précédent (arrondi à
+// demande 5 % d'XP de plus que le seuil du niveau précédent (arrondi à
 // l'entier le plus proche à CHAQUE niveau, pas recalculé depuis la base à
-// chaque appel — le seuil du niveau 10 doit être +20 % du seuil arrondi du
-// niveau 9, pas 1.2^9 fois la base). Niveau 1 : 100 XP.
+// chaque appel — le seuil du niveau 10 doit être +5 % du seuil arrondi du
+// niveau 9, pas 1.05^9 fois la base). Niveau 1 : 100 XP.
 const XP_CURVE_BASE = 100;
-const XP_CURVE_GROWTH = 1.2;
+const XP_CURVE_GROWTH = 1.05;
 
 const xpToReachNextLevel = (level: number): number => {
 	let xp = XP_CURVE_BASE;
