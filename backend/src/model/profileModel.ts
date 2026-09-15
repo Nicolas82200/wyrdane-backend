@@ -3,6 +3,7 @@ import db from "./db";
 import { findOne } from "./userModel";
 import { getStats as getRankedStats, CURRENT_SEASON } from "./rankedModel";
 import { getStats as getSoloStats } from "./soloStatsModel";
+import { getLevel } from "./levelModel";
 
 interface ProfileData {
 	id: number;
@@ -11,6 +12,7 @@ interface ProfileData {
 	collection_count: number;
 	solo: { wins: number; losses: number };
 	ranked: { mmr: number; wins: number; losses: number; rank: number };
+	level: { level: number; xp: number; xpToNext: number };
 }
 
 const getCollectionCount = async (userId: number): Promise<number> => {
@@ -36,10 +38,11 @@ const getProfile = async (userId: number): Promise<ProfileData | null> => {
 	const [user] = await findOne(userId);
 	if (!user) return null;
 
-	const [collectionCount, soloStats, rankedStats] = await Promise.all([
+	const [collectionCount, soloStats, rankedStats, level] = await Promise.all([
 		getCollectionCount(userId),
 		getSoloStats(userId),
 		getRankedStats(userId),
+		getLevel(userId),
 	]);
 
 	const rank = await getRank(rankedStats.mmr);
@@ -51,6 +54,7 @@ const getProfile = async (userId: number): Promise<ProfileData | null> => {
 		collection_count: collectionCount,
 		solo: { wins: soloStats.wins, losses: soloStats.losses },
 		ranked: { mmr: rankedStats.mmr, wins: rankedStats.wins, losses: rankedStats.losses, rank },
+		level,
 	};
 };
 
