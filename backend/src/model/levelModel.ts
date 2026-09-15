@@ -14,11 +14,11 @@ const XP_WIN_NETWORK = 50;
 const XP_LOSS_NETWORK = 15;
 
 // XP requise pour passer du niveau `level` à `level + 1` : croissance
-// linéaire, +10 XP de palier par niveau (110 au niveau 1, 120 au niveau 2,
-// 130 au niveau 3...). Contrairement à l'ancienne courbe géométrique, ne
+// linéaire, +5 XP de palier par niveau (105 au niveau 1, 110 au niveau 2,
+// 115 au niveau 3...). Contrairement à l'ancienne courbe géométrique, ne
 // dépend pas du seuil précédent — calcul direct, pas de dérive d'arrondi.
 const XP_CURVE_BASE = 100;
-const XP_CURVE_STEP = 10;
+const XP_CURVE_STEP = 5;
 
 const xpToReachNextLevel = (level: number): number => XP_CURVE_BASE + XP_CURVE_STEP * level;
 
