@@ -87,8 +87,23 @@ describe("applyXp", () => {
 
 		expect(result.level).toBe(2);
 		expect(result.xp).toBe(30); // 90 + 50 - 110 (xpToReachNextLevel(1))
-		expect(mockedCredit).toHaveBeenCalledWith(1, 50, "level_reward_gold", "level_2", connection);
+		expect(mockedCredit).toHaveBeenCalledWith(1, 50, "level_reward_gold", "level_2", connection); // 2e palier d'or (level % 5 === 2)
 		expect(result.rewards).toEqual([{ level: 2, type: "gold", gold: 50 }]);
+	});
+
+	it("ramps the gold-only reward 25/50/75/100 across a streak, then resets to 25 after a card level", async () => {
+		mockedGetOwnedQuantity.mockResolvedValue(0);
+		const cardsByRarity = { Commune: [{ id: 42, rarity: "Commune" }] };
+		const goldRewards: number[] = [];
+
+		for (let startLevel = 0; startLevel <= 5; startLevel++) {
+			const connection = makeConnection({ level: startLevel, xp: 0 }, cardsByRarity);
+			const result = await applyXp(9, xpToReachNextLevel(startLevel), connection);
+			const reward = result.rewards[0];
+			goldRewards.push(reward.type === "gold" ? reward.gold! : -1); // -1 = palier carte (level 5)
+		}
+
+		expect(goldRewards).toEqual([25, 50, 75, 100, -1, 25]);
 	});
 
 	it("grants a random Commune card at level 5", async () => {

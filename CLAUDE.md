@@ -101,7 +101,7 @@ Rollout en deux temps pour ne pas casser le classé pour la version de `card-gam
 XP requise pour passer du niveau `n` à `n+1` : `xpToReachNextLevel(n)` croît **linéairement**, `100 + 10×n` (110 XP au niveau 1, 120 au niveau 2, 130 au niveau 3...) — calcul direct indépendant du seuil précédent, pas de dérive d'arrondi possible. Récompense à chaque niveau franchi (`rewardKindForLevel`, un seul niveau peut normalement être franchi par match, mais `applyXp` boucle pour en gérer plusieurs si jamais l'XP par match grandissait) :
 - multiple de 25 → 1 pack gratuit (`currencyModel.creditFreePacks`, même solde que les quêtes hebdo/parrainage) **+ 200 or** (`GOLD_BONUS_PER_PACK_LEVEL`) ;
 - sinon multiple de 5 → une carte aléatoire d'une rareté qui cycle sur 20 niveaux (5→Commune, 10→Rare, 15→Épique, 20/40/60...→Légendaire) **+ 100 or** (`GOLD_BONUS_PER_CARD_LEVEL`, cumulé avec un éventuel dust si le joueur possède déjà `MAX_COPIES_PER_CARD` exemplaires — même logique de dust que `packModel.drawAndGrantCards`) ; si aucune carte de cette rareté n'existe en base, le bonus de 100 or remplace entièrement la récompense (type `"gold"`) ;
-- sinon → 50 or fixe (`GOLD_REWARD_PER_LEVEL`).
+- sinon → or croissant sur une série de 4 niveaux, 25/50/75/100 (`goldRewardForLevel`, lu directement sur `level % 5` ∈ {1,2,3,4} — ces niveaux tombent toujours par groupes de 4 entre deux paliers carte/pack, donc jamais besoin de mémoriser où on en est dans la série), qui retombe à 25 dès le niveau suivant un palier carte ou pack.
 
 Le champ `gold` d'un `LevelReward` reflète toujours le montant total réellement crédité pour ce palier (bonus seul, bonus+dust, ou or fixe), jamais seulement une composante — `rankedController`/`LevelManager.gd` n'ont qu'à l'afficher tel quel.
 

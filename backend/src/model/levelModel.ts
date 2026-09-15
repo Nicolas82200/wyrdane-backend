@@ -51,8 +51,19 @@ const CARD_RARITY_BY_LEVEL_MOD_20: Record<number, string> = {
 	0: "Légendaire",
 };
 
-// Or accordé aux niveaux qui n'offrent ni carte ni pack.
-const GOLD_REWARD_PER_LEVEL = 50;
+// Or accordé aux niveaux qui n'offrent ni carte ni pack : monte à chaque
+// niveau au sein d'une série de 4 (25/50/75/100), puis retombe à 25 dès
+// qu'un niveau a offert autre chose que de l'or (carte ou pack, toujours
+// multiple de 5) — level % 5 vaut 1/2/3/4 sur ces niveaux-là, jamais 0,
+// donc la position dans la série se lit directement dessus.
+const GOLD_TIER_BY_LEVEL_MOD_5: Record<number, number> = {
+	1: 25,
+	2: 50,
+	3: 75,
+	4: 100,
+};
+const goldRewardForLevel = (level: number): number => GOLD_TIER_BY_LEVEL_MOD_5[level % 5] ?? 100;
+
 // Or accordé EN PLUS de la carte/du pack aux paliers multiples de 5/25.
 const GOLD_BONUS_PER_CARD_LEVEL = 100;
 const GOLD_BONUS_PER_PACK_LEVEL = 200;
@@ -128,8 +139,9 @@ const grantLevelReward = async (
 		return { level, type: "card", card, dusted: false, gold: GOLD_BONUS_PER_CARD_LEVEL };
 	}
 
-	await credit(userId, GOLD_REWARD_PER_LEVEL, "level_reward_gold", `level_${level}`, connection);
-	return { level, type: "gold", gold: GOLD_REWARD_PER_LEVEL };
+	const gold = goldRewardForLevel(level);
+	await credit(userId, gold, "level_reward_gold", `level_${level}`, connection);
+	return { level, type: "gold", gold };
 };
 
 const getLevel = async (userId: number): Promise<{ level: number; xp: number; xpToNext: number }> => {
