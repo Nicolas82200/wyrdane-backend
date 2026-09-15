@@ -57,11 +57,12 @@ const makeConnection = (
 };
 
 describe("xpToReachNextLevel", () => {
-	it("follows the 100 + 10*(level-1) curve", () => {
+	it("grows 20% per level over the previous (rounded) threshold, starting at 100", () => {
 		expect(xpToReachNextLevel(1)).toBe(100);
-		expect(xpToReachNextLevel(2)).toBe(110);
-		expect(xpToReachNextLevel(9)).toBe(180);
-		expect(xpToReachNextLevel(24)).toBe(330);
+		expect(xpToReachNextLevel(2)).toBe(120); // round(100 * 1.2)
+		expect(xpToReachNextLevel(3)).toBe(144); // round(120 * 1.2)
+		expect(xpToReachNextLevel(9)).toBe(432);
+		expect(xpToReachNextLevel(24)).toBe(6647);
 	});
 });
 
@@ -158,8 +159,8 @@ describe("applyXp", () => {
 
 	it("grants a reward for every level crossed in a single large XP gain", async () => {
 		const connection = makeConnection({ level: 1, xp: 0 });
-		// xpToReachNextLevel(1)=100, (2)=110 : 210 XP franchit pile les niveaux 2 et 3.
-		const result = await applyXp(6, 210, connection);
+		// xpToReachNextLevel(1)=100, (2)=120 : 220 XP franchit pile les niveaux 2 et 3.
+		const result = await applyXp(6, 220, connection);
 
 		expect(result.level).toBe(3);
 		expect(result.xp).toBe(0);

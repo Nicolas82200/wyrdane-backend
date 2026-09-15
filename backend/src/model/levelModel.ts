@@ -13,9 +13,21 @@ import type { Cards } from "../types";
 const XP_WIN_NETWORK = 50;
 const XP_LOSS_NETWORK = 15;
 
-// XP requise pour passer du niveau `level` à `level + 1`. Courbe légèrement
-// croissante : chaque niveau demande 10 XP de plus que le précédent.
-const xpToReachNextLevel = (level: number): number => 100 + 10 * (level - 1);
+// XP requise pour passer du niveau `level` à `level + 1` : chaque niveau
+// demande 20 % d'XP de plus que le seuil du niveau précédent (arrondi à
+// l'entier le plus proche à CHAQUE niveau, pas recalculé depuis la base à
+// chaque appel — le seuil du niveau 10 doit être +20 % du seuil arrondi du
+// niveau 9, pas 1.2^9 fois la base). Niveau 1 : 100 XP.
+const XP_CURVE_BASE = 100;
+const XP_CURVE_GROWTH = 1.2;
+
+const xpToReachNextLevel = (level: number): number => {
+	let xp = XP_CURVE_BASE;
+	for (let i = 1; i < level; i++) {
+		xp = Math.round(xp * XP_CURVE_GROWTH);
+	}
+	return xp;
+};
 
 // Rareté de la carte offerte tous les 5 niveaux, cyclique sur 20 niveaux
 // (5 → Commune, 10 → Rare, 15 → Épique, 20/40/60... → Légendaire). Un niveau

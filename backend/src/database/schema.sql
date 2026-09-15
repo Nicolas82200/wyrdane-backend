@@ -61,7 +61,8 @@ CREATE TABLE users (
   free_packs INT NOT NULL DEFAULT 0,
   -- Niveau de compte (voir levelModel.ts) : remplace l'ancien barème d'or par
   -- match classé. XP créditée par match réseau (classé/partie rapide, pas le
-  -- solo), courbe xpToReachNextLevel = 100 + 10*(level-1). Récompense à
+  -- solo), courbe xpToReachNextLevel : +20% par niveau sur le seuil arrondi
+  -- du niveau précédent, 100 XP au niveau 1. Récompense à
   -- chaque niveau franchi (carte tous les 5, pack tous les 25, or sinon) —
   -- voir levelModel.rewardKindForLevel.
   level INT NOT NULL DEFAULT 1,
