@@ -9,6 +9,7 @@ import authRouter from "./authRouter";
 import cardRouter from "./cardRouter";
 import collectionRouter from "./collectionRouter";
 import contactRouter from "./contactRouter";
+import crashReportRouter from "./crashReportRouter";
 import currencyRouter from "./currencyRouter";
 import deckRouter from "./deckRouter";
 import loginRewardRouter from "./loginRewardRouter";
@@ -27,8 +28,8 @@ const router = Router();
 
 // requireCsrfHeader après authorization sur chaque routeur authentifié par
 // cookie (voir middleware/csrf.ts) : /auth (login, pas encore de session),
-// /contact et /analytics (pas de cookie de session, pas de CORS credentials à
-// détourner) restent volontairement hors de sa portée.
+// /contact, /analytics et /crash-report (pas de cookie de session, pas de CORS
+// credentials à détourner) restent volontairement hors de sa portée.
 router.use("/users", authorization, requireCsrfHeader, userRouter);
 router.use("/auth", authRouter);
 
@@ -38,6 +39,7 @@ router.use("/analytics", analyticsRouter);
 router.use("/cards", authorization, requireCsrfHeader, cardRouter);
 router.use("/collection", authorization, requireCsrfHeader, collectionRouter);
 router.use("/contact", contactRouter);
+router.use("/crash-report", crashReportRouter);
 router.use("/currency", authorization, requireCsrfHeader, currencyRouter);
 router.use("/decks", authorization, requireCsrfHeader, deckRouter);
 router.use("/login-reward", authorization, requireCsrfHeader, loginRewardRouter);
