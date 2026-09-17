@@ -43,6 +43,7 @@ describe("submitCrashReport", () => {
 					expect.objectContaining({ name: "Fin du log" }),
 				]),
 			}),
+			expect.stringContaining("Alice"),
 		);
 		expect(res.sendStatus).toHaveBeenCalledWith(200);
 	});
