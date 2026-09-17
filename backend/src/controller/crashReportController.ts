@@ -57,17 +57,21 @@ const submitCrashReport = async (req: Request, res: Response): Promise<void> => 
 			return;
 		}
 
-		await sendDiscordWebhook({
-			title: `🔥 ${CRASH_TYPE_LABELS[crashType]} signalé par un joueur`,
-			color: 0xb02e2e,
-			timestamp: new Date().toISOString(),
-			fields: [
-				{ name: "Plateforme", value: truncate(platform ?? "inconnue", MAX_STRING_LENGTH), inline: true },
-				{ name: "Version", value: truncate(gameVersion ?? "inconnue", MAX_STRING_LENGTH), inline: true },
-				{ name: "Joueur", value: truncate(reporterName ?? "anonyme", MAX_STRING_LENGTH), inline: true },
-				{ name: "Fin du log", value: tailOf(log.trim(), MAX_LOG_FIELD_LENGTH) },
-			],
-		});
+		const safeReporterName = truncate(reporterName ?? "anonyme", MAX_STRING_LENGTH);
+		await sendDiscordWebhook(
+			{
+				title: `🔥 ${CRASH_TYPE_LABELS[crashType]} signalé par un joueur`,
+				color: 0xb02e2e,
+				timestamp: new Date().toISOString(),
+				fields: [
+					{ name: "Plateforme", value: truncate(platform ?? "inconnue", MAX_STRING_LENGTH), inline: true },
+					{ name: "Version", value: truncate(gameVersion ?? "inconnue", MAX_STRING_LENGTH), inline: true },
+					{ name: "Joueur", value: safeReporterName, inline: true },
+					{ name: "Fin du log", value: tailOf(log.trim(), MAX_LOG_FIELD_LENGTH) },
+				],
+			},
+			`${CRASH_TYPE_LABELS[crashType]} — ${safeReporterName}`,
+		);
 
 		res.sendStatus(200);
 	} catch (error) {

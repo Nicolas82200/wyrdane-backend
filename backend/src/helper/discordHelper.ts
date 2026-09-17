@@ -18,7 +18,10 @@ type DiscordEmbed = {
 	timestamp?: string;
 };
 
-const sendDiscordWebhook = async (embed: DiscordEmbed): Promise<void> => {
+// threadName : requis par Discord si le webhook est attaché à un salon de
+// FORUM (chaque message y ouvre son propre fil) — ignoré sans erreur si le
+// webhook est sur un salon textuel classique, donc toujours safe à fournir.
+const sendDiscordWebhook = async (embed: DiscordEmbed, threadName?: string): Promise<void> => {
 	const webhookUrl = process.env.DISCORD_CRASH_WEBHOOK_URL;
 	if (!webhookUrl) return;
 
@@ -26,7 +29,10 @@ const sendDiscordWebhook = async (embed: DiscordEmbed): Promise<void> => {
 		await fetch(webhookUrl, {
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({ embeds: [embed] }),
+			body: JSON.stringify({
+				embeds: [embed],
+				...(threadName ? { thread_name: threadName.slice(0, 100) } : {}),
+			}),
 		});
 	} catch (error) {
 		// Best-effort : un webhook Discord indisponible ne doit jamais faire
