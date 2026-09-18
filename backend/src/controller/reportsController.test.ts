@@ -1,19 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Request, Response } from "express";
 
-vi.mock("../helper/mailHelper", () => ({
-	sendMail: vi.fn(),
+vi.mock("../helper/discordHelper", () => ({
+	sendDiscordWebhook: vi.fn(),
 }));
 vi.mock("../model/reportsModel", () => ({
 	findUsername: vi.fn(),
 }));
 
-import { sendMail } from "../helper/mailHelper";
+import { sendDiscordWebhook } from "../helper/discordHelper";
 import { findUsername } from "../model/reportsModel";
 import { createReport } from "./reportsController";
 
 const mocked = {
-	sendMail: sendMail as ReturnType<typeof vi.fn>,
+	sendDiscordWebhook: sendDiscordWebhook as ReturnType<typeof vi.fn>,
 	findUsername: findUsername as ReturnType<typeof vi.fn>,
 };
 
@@ -41,7 +41,7 @@ describe("createReport", () => {
 		await createReport(req, res);
 
 		expect(res.status).toHaveBeenCalledWith(401);
-		expect(mocked.sendMail).not.toHaveBeenCalled();
+		expect(mocked.sendDiscordWebhook).not.toHaveBeenCalled();
 	});
 
 	it("rejects an unknown report type", async () => {
@@ -51,7 +51,7 @@ describe("createReport", () => {
 		await createReport(req, res);
 
 		expect(res.status).toHaveBeenCalledWith(400);
-		expect(mocked.sendMail).not.toHaveBeenCalled();
+		expect(mocked.sendDiscordWebhook).not.toHaveBeenCalled();
 	});
 
 	it("rejects an empty description", async () => {
@@ -61,7 +61,7 @@ describe("createReport", () => {
 		await createReport(req, res);
 
 		expect(res.status).toHaveBeenCalledWith(400);
-		expect(mocked.sendMail).not.toHaveBeenCalled();
+		expect(mocked.sendDiscordWebhook).not.toHaveBeenCalled();
 	});
 
 	it("rejects a cheating report without a reported user", async () => {
@@ -71,17 +71,22 @@ describe("createReport", () => {
 		await createReport(req, res);
 
 		expect(res.status).toHaveBeenCalledWith(400);
-		expect(mocked.sendMail).not.toHaveBeenCalled();
+		expect(mocked.sendDiscordWebhook).not.toHaveBeenCalled();
 	});
 
-	it("sends the mail and returns 200 for a valid bug report", async () => {
+	it("sends the report to Discord and returns 200 for a valid bug report", async () => {
 		const req = reqAs(1, { type: "bug", description: "Le jeu crash au mulligan." });
 		const res = mockRes();
 
 		await createReport(req, res);
 
-		expect(mocked.sendMail).toHaveBeenCalledWith(
-			expect.objectContaining({ text: expect.stringContaining("Le jeu crash au mulligan.") }),
+		expect(mocked.sendDiscordWebhook).toHaveBeenCalledWith(
+			expect.objectContaining({
+				fields: expect.arrayContaining([
+					expect.objectContaining({ name: "Description", value: "Le jeu crash au mulligan." }),
+				]),
+			}),
+			expect.stringContaining("Reporter"),
 		);
 		expect(res.sendStatus).toHaveBeenCalledWith(200);
 	});
@@ -98,9 +103,10 @@ describe("createReport", () => {
 
 		await createReport(req, res);
 
-		const [[mailArg]] = mocked.sendMail.mock.calls;
-		expect(mailArg.text).toContain("Cheater");
-		expect(mailArg.text).toContain("match-123");
+		const [[embedArg]] = mocked.sendDiscordWebhook.mock.calls;
+		const fieldValues = embedArg.fields.map((f: { value: string }) => f.value).join(" ");
+		expect(fieldValues).toContain("Cheater");
+		expect(fieldValues).toContain("match-123");
 		expect(res.sendStatus).toHaveBeenCalledWith(200);
 	});
 });
