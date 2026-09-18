@@ -1,15 +1,21 @@
 import { Request, Response } from "express";
 
 import { sendDiscordWebhook } from "../helper/discordHelper";
+import type { DiscordEmbedField } from "../helper/discordHelper";
 
 // Pas de table dédiée : même choix que reportsController (signalement joueur)
 // et contactController — le rapport est simplement transmis, ici sur le salon
 // Discord de développement plutôt que par mail, pour une visibilité immédiate.
-// Discord tronque une valeur de field à 1024 caractères : on ne garde que la
-// FIN du log (le crash/gel est toujours la dernière chose écrite avant l'arrêt),
-// avec une marge sous la limite pour le préfixe "(tronqué, ...)".
+// Discord tronque une valeur de field à 1024 caractères : le field ne garde
+// qu'un aperçu (la FIN du log, le crash/gel étant toujours la dernière chose
+// écrite avant l'arrêt) — le log COMPLET est joint en pièce jointe .txt (voir
+// plus bas), pour permettre de repérer d'autres erreurs plus tôt dans la
+// session, pas seulement celle qui a précédé l'arrêt.
 const MAX_LOG_FIELD_LENGTH = 950;
-const MAX_LOG_INPUT_LENGTH = 200_000; // borne large côté requête, avant troncature d'affichage
+// Borne large : un vrai fichier de log de session peut atteindre plusieurs
+// centaines de Ko, largement sous la limite de pièce jointe des webhooks
+// Discord (25 Mo par défaut).
+const MAX_LOG_INPUT_LENGTH = 5_000_000;
 const MAX_STRING_LENGTH = 200;
 const MAX_COMMENT_LENGTH = 1000;
 
@@ -57,7 +63,7 @@ const submitCrashReport = async (req: Request, res: Response): Promise<void> => 
 		}
 
 		const safeReporterName = truncate(reporterName ?? "anonyme", MAX_STRING_LENGTH);
-		const fields = [
+		const fields: DiscordEmbedField[] = [
 			{ name: "Plateforme", value: truncate(platform ?? "inconnue", MAX_STRING_LENGTH), inline: true },
 			{ name: "Version", value: truncate(gameVersion ?? "inconnue", MAX_STRING_LENGTH), inline: true },
 			{ name: "Joueur", value: safeReporterName, inline: true },
@@ -75,6 +81,7 @@ const submitCrashReport = async (req: Request, res: Response): Promise<void> => 
 				fields,
 			},
 			`Rapport de ${safeReporterName}`,
+			{ filename: `crash-log-${Date.now()}.txt`, content: log },
 		);
 
 		res.sendStatus(200);

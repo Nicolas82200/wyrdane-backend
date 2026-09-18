@@ -45,6 +45,7 @@ describe("submitCrashReport", () => {
 				]),
 			}),
 			expect.stringContaining("Alice"),
+			expect.objectContaining({ filename: expect.stringMatching(/^crash-log-\d+\.txt$/), content: validBody.log }),
 		);
 		expect(res.sendStatus).toHaveBeenCalledWith(200);
 	});
@@ -71,7 +72,7 @@ describe("submitCrashReport", () => {
 	});
 
 	it("rejects an oversized log", async () => {
-		const req = { body: { ...validBody, log: "x".repeat(200_001) } } as Request;
+		const req = { body: { ...validBody, log: "x".repeat(5_000_001) } } as Request;
 		const res = mockRes();
 
 		await submitCrashReport(req, res);
