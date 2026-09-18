@@ -47,7 +47,8 @@ describe("submitCrashReport", () => {
 			expect.stringContaining("Alice"),
 			expect.objectContaining({ filename: expect.stringMatching(/^crash-log-\d+\.txt$/), content: validBody.log }),
 		);
-		expect(res.sendStatus).toHaveBeenCalledWith(200);
+		expect(res.status).toHaveBeenCalledWith(200);
+		expect(res.json).toHaveBeenCalledWith({ success: true });
 	});
 
 	it("accepts a submission without a comment (optional field)", async () => {
@@ -58,7 +59,8 @@ describe("submitCrashReport", () => {
 
 		const call = mocked.sendDiscordWebhook.mock.calls[0][0];
 		expect(call.fields.some((f: { name: string }) => f.name === "Ce que faisait le joueur")).toBe(false);
-		expect(res.sendStatus).toHaveBeenCalledWith(200);
+		expect(res.status).toHaveBeenCalledWith(200);
+		expect(res.json).toHaveBeenCalledWith({ success: true });
 	});
 
 	it("rejects a submission missing the log", async () => {
@@ -110,6 +112,7 @@ describe("submitCrashReport", () => {
 		await submitCrashReport(req, res);
 
 		expect(mocked.sendDiscordWebhook).not.toHaveBeenCalled();
-		expect(res.sendStatus).toHaveBeenCalledWith(200);
+		expect(res.status).toHaveBeenCalledWith(200);
+		expect(res.json).toHaveBeenCalledWith({ success: true });
 	});
 });

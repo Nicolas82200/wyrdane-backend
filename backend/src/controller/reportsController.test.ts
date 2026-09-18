@@ -88,7 +88,8 @@ describe("createReport", () => {
 			}),
 			expect.stringContaining("Reporter"),
 		);
-		expect(res.sendStatus).toHaveBeenCalledWith(200);
+		expect(res.status).toHaveBeenCalledWith(200);
+		expect(res.json).toHaveBeenCalledWith({ success: true });
 	});
 
 	it("includes the reported player and match id for a cheating report", async () => {
@@ -107,6 +108,7 @@ describe("createReport", () => {
 		const fieldValues = embedArg.fields.map((f: { value: string }) => f.value).join(" ");
 		expect(fieldValues).toContain("Cheater");
 		expect(fieldValues).toContain("match-123");
-		expect(res.sendStatus).toHaveBeenCalledWith(200);
+		expect(res.status).toHaveBeenCalledWith(200);
+		expect(res.json).toHaveBeenCalledWith({ success: true });
 	});
 });
