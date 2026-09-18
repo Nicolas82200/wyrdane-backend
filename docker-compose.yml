@@ -58,6 +58,7 @@ services:
       SMTP_PASS: ${SMTP_PASS}
       SMTP_FROM: ${SMTP_FROM}
       CONTACT_EMAIL_TO: ${CONTACT_EMAIL_TO}
+      DISCORD_CRASH_WEBHOOK_URL: ${DISCORD_CRASH_WEBHOOK_URL}
     ports:
       # Exposé uniquement sur localhost -> Nginx (natif) fait le proxy vers ici
       - "127.0.0.1:3000:3000"
