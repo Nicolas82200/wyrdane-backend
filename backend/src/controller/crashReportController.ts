@@ -11,18 +11,17 @@ import { sendDiscordWebhook } from "../helper/discordHelper";
 const MAX_LOG_FIELD_LENGTH = 950;
 const MAX_LOG_INPUT_LENGTH = 200_000; // borne large côté requête, avant troncature d'affichage
 const MAX_STRING_LENGTH = 200;
-
-const CRASH_TYPE_LABELS: Record<string, string> = {
-	crash: "Plantage",
-	freeze: "Gel (fenêtre \"ne répond plus\")",
-};
+const MAX_COMMENT_LENGTH = 1000;
 
 type CrashReportBody = {
-	crashType?: string;
 	platform?: string;
 	gameVersion?: string;
 	reporterName?: string;
 	log?: string;
+	// Ce que le joueur faisait au moment du problème, saisi librement dans la
+	// popup — facultatif, aucun choix de catégorie (plantage/gel) n'est demandé
+	// côté client : le commentaire libre remplace cette distinction.
+	comment?: string;
 	// Champ honeypot, même convention que contactController.
 	website?: string;
 };
@@ -37,17 +36,13 @@ const tailOf = (value: string, maxLength: number): string => {
 
 const submitCrashReport = async (req: Request, res: Response): Promise<void> => {
 	try {
-		const { crashType, platform, gameVersion, reporterName, log, website } = req.body as CrashReportBody;
+		const { platform, gameVersion, reporterName, log, comment, website } = req.body as CrashReportBody;
 
 		if (website) {
 			res.sendStatus(200);
 			return;
 		}
 
-		if (!crashType || !CRASH_TYPE_LABELS[crashType]) {
-			res.status(400).json({ message: "Type de rapport invalide" });
-			return;
-		}
 		if (!log || !log.trim()) {
 			res.status(400).json({ message: "Log requis" });
 			return;
@@ -56,21 +51,30 @@ const submitCrashReport = async (req: Request, res: Response): Promise<void> => 
 			res.status(400).json({ message: "Log trop volumineux" });
 			return;
 		}
+		if (comment && comment.length > MAX_COMMENT_LENGTH) {
+			res.status(400).json({ message: "Commentaire trop long" });
+			return;
+		}
 
 		const safeReporterName = truncate(reporterName ?? "anonyme", MAX_STRING_LENGTH);
+		const fields = [
+			{ name: "Plateforme", value: truncate(platform ?? "inconnue", MAX_STRING_LENGTH), inline: true },
+			{ name: "Version", value: truncate(gameVersion ?? "inconnue", MAX_STRING_LENGTH), inline: true },
+			{ name: "Joueur", value: safeReporterName, inline: true },
+		];
+		if (comment && comment.trim()) {
+			fields.push({ name: "Ce que faisait le joueur", value: truncate(comment.trim(), MAX_COMMENT_LENGTH), inline: false });
+		}
+		fields.push({ name: "Fin du log", value: tailOf(log.trim(), MAX_LOG_FIELD_LENGTH), inline: false });
+
 		await sendDiscordWebhook(
 			{
-				title: `🔥 ${CRASH_TYPE_LABELS[crashType]} signalé par un joueur`,
+				title: "🔥 Plantage/gel signalé par un joueur",
 				color: 0xb02e2e,
 				timestamp: new Date().toISOString(),
-				fields: [
-					{ name: "Plateforme", value: truncate(platform ?? "inconnue", MAX_STRING_LENGTH), inline: true },
-					{ name: "Version", value: truncate(gameVersion ?? "inconnue", MAX_STRING_LENGTH), inline: true },
-					{ name: "Joueur", value: safeReporterName, inline: true },
-					{ name: "Fin du log", value: tailOf(log.trim(), MAX_LOG_FIELD_LENGTH) },
-				],
+				fields,
 			},
-			`${CRASH_TYPE_LABELS[crashType]} — ${safeReporterName}`,
+			`Rapport de ${safeReporterName}`,
 		);
 
 		res.sendStatus(200);
