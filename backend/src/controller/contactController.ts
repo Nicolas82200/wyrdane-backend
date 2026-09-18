@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 
 import { sendMail } from "../helper/mailHelper";
+import { sendDiscordWebhook } from "../helper/discordHelper";
 
 const CATEGORY_LABELS: Record<string, string> = {
 	bug: "Bug / problème en jeu",
@@ -9,6 +10,13 @@ const CATEGORY_LABELS: Record<string, string> = {
 	partnership: "Partenariat / presse",
 	other: "Autre",
 };
+
+// Catégorie envoyée sur le salon Discord de développement (même webhook que
+// CrashReporter/reportsController) plutôt que par mail — les autres
+// catégories (question/illustrateur/partenariat) restent par mail, une
+// candidature ou une demande de partenariat n'ayant pas sa place sur ce salon.
+const DISCORD_CATEGORY = "bug";
+const MAX_MESSAGE_FIELD_LENGTH = 1000;
 
 const MAX_MESSAGE_LENGTH = 5000;
 const MAX_NAME_LENGTH = 200;
@@ -62,19 +70,37 @@ const submitContact = async (req: Request, res: Response): Promise<void> => {
 			return;
 		}
 
-		const lines = [
-			`Catégorie : ${CATEGORY_LABELS[category]}`,
-			`De : ${name} <${email}>`,
-			portfolioLink ? `Portfolio : ${portfolioLink}` : null,
-			"",
-			message,
-		].filter((line): line is string => line !== null);
+		if (category === DISCORD_CATEGORY) {
+			const messageField = message.length > MAX_MESSAGE_FIELD_LENGTH
+				? `${message.slice(0, MAX_MESSAGE_FIELD_LENGTH)}… (tronqué)`
+				: message;
+			await sendDiscordWebhook(
+				{
+					title: `🐛 ${CATEGORY_LABELS[category]}`,
+					color: 0xd6a94a,
+					timestamp: new Date().toISOString(),
+					fields: [
+						{ name: "De", value: `${name} <${email}>` },
+						{ name: "Message", value: messageField },
+					],
+				},
+				`Bug (site) par ${name}`,
+			);
+		} else {
+			const lines = [
+				`Catégorie : ${CATEGORY_LABELS[category]}`,
+				`De : ${name} <${email}>`,
+				portfolioLink ? `Portfolio : ${portfolioLink}` : null,
+				"",
+				message,
+			].filter((line): line is string => line !== null);
 
-		await sendMail({
-			replyTo: email,
-			subject: `[Wyrdane] ${CATEGORY_LABELS[category]} - ${name} <${email}>`,
-			text: lines.join("\n"),
-		});
+			await sendMail({
+				replyTo: email,
+				subject: `[Wyrdane] ${CATEGORY_LABELS[category]} - ${name} <${email}>`,
+				text: lines.join("\n"),
+			});
+		}
 
 		res.sendStatus(200);
 	} catch (error) {
