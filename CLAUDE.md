@@ -60,6 +60,16 @@ Variables d'environnement nécessaires (voir `.env.sample`) : `STEAM_WEB_API_KEY
 
 Routes protégées par statut admin (`adminRouter.ts`) : `GET /api/admin/me` (vérifie le statut admin du compte courant), `GET /api/admin/stats` (fréquentation, connexions Steam par origine site/jeu, utilisateurs uniques — alimenté par `recordLogin` et le tracking de pageviews), `PUT /api/admin/wishlist` (compteur de wishlist Steam saisi manuellement, pas d'API Steamworks publique pour ce chiffre). Consommé côté site par une page `/admin` non listée dans la navigation (accès direct par URL). Pageviews trackées via `POST /api/analytics/pageview` (`analyticsRouter.ts`), appelé à chaque navigation SPA côté site (`usePageviewTracking.ts`).
 
+## Notifications Discord
+
+`discordHelper.ts` (`sendDiscordWebhook`) relaie des évènements en direct sur un salon Discord de développement via un webhook entrant (Paramètres du salon > Intégrations > Webhooks), lu à l'usage depuis `DISCORD_CRASH_WEBHOOK_URL` (nom historique — réutilisé pour tout ce qui suit, pas seulement les crashs). Soft no-op silencieux si la variable est absente (dev local sans webhook configuré) : jamais d'erreur remontée à l'appelant. Le salon cible est un salon de **forum** : chaque appel fournit un `threadName` (tronqué à 100 caractères), qui ouvre un nouveau fil par évènement — nécessaire sur ce type de salon, sans effet sur un salon textuel classique. Aucune table dédiée pour aucun de ces trois flux : c'est un relais direct, rien n'est conservé en base une fois le message posté (si une vraie persistance/historique est utile un jour, à construire séparément).
+
+- **`crashReportController.ts`** (`POST /api/crash-report`, public, pas d'auth) : crash/gel signalé depuis le jeu (voir `CrashReporter.gd` côté `card-game`). Log complet du joueur joint en pièce jointe `.txt` (via `sendDiscordWebhook(embed, threadName, attachment)`, requête multipart), un aperçu de sa fin reste aussi dans un field de l'embed pour lecture rapide sans télécharger le fichier.
+- **`reportsController.ts`** (`POST /api/reports`, authentifié) : signalement bug/triche depuis le menu Échap en partie. Pseudo du signalant et, pour un signalement Triche, pseudo du joueur signalé (résolu côté serveur via `reportedUserId`, jamais fait confiance au client) inclus dans l'embed.
+- **`contactController.ts`** (`POST /api/contact`, public) : seule la catégorie "Bug / problème en jeu" du formulaire "Nous contacter" du site part sur Discord — les autres catégories (question générale, candidature illustrateur, partenariat/presse) restent envoyées par mail (`mailHelper.ts`), une candidature ou une demande de partenariat n'ayant pas sa place sur ce salon.
+
+Important côté déploiement : `docker-compose.yml` doit explicitement lister `DISCORD_CRASH_WEBHOOK_URL: ${DISCORD_CRASH_WEBHOOK_URL}` dans le bloc `environment:` du service `backend` — une variable présente dans le `.env` du VPS mais absente de ce bloc reste invisible pour le conteneur quel que soit le redémarrage effectué (piège rencontré en prod le 2026-09-18 : la route répondait 200 sans jamais rien poster sur Discord, jusqu'à l'ajout de cette ligne).
+
 ## Lancer le projet
 
 ```
