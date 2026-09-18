@@ -35,4 +35,22 @@ const sanitizeDeckRaces = (value: string[] | undefined): string[] | undefined =>
 	return sanitized.length > 0 ? sanitized : undefined;
 };
 
-export { IMPLEMENTED_RACES, sanitizeCardsPlayedByRace, sanitizeDeckRaces };
+// Borne la liste des cartes posées déclarée par le client (voir
+// docs/backend-contracts/card-stats-and-leaderboard.md côté card-game) avant
+// qu'elle n'alimente card_play_stats — même logique défensive que
+// sanitizeCardsPlayedByRace : un payload absurde ne doit pas pouvoir gonfler
+// une requête SQL ou polluer les stats d'équilibrage. Même borne que
+// MAX_CARDS_PLAYED_PER_RACE (un deck ne dépasse pas une centaine de cartes
+// jouables, voir ACH_MEGA_DECK) mais appliquée au total, pas par race.
+const MAX_CARDS_PLAYED_TOTAL = 200;
+const MAX_CARD_NAME_LENGTH = 100;
+
+const sanitizeCardsPlayed = (value: string[] | undefined): string[] | undefined => {
+	if (!Array.isArray(value)) return undefined;
+	const sanitized = value
+		.filter((name): name is string => typeof name === "string" && name.length > 0 && name.length <= MAX_CARD_NAME_LENGTH)
+		.slice(0, MAX_CARDS_PLAYED_TOTAL);
+	return sanitized.length > 0 ? sanitized : undefined;
+};
+
+export { IMPLEMENTED_RACES, sanitizeCardsPlayedByRace, sanitizeDeckRaces, sanitizeCardsPlayed };

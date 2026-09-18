@@ -238,11 +238,34 @@ CREATE TABLE match_reports (
   season INT NOT NULL,
   cards_played_by_race JSON NULL,
   deck_races JSON NULL,
+  -- Liste brute des cartes posées par le reporter (doublons inclus si jouée
+  -- plusieurs fois), utilisée une fois le match confirmé pour alimenter
+  -- card_play_stats (équilibrage) — voir
+  -- docs/backend-contracts/card-stats-and-leaderboard.md côté card-game.
+  cards_played JSON NULL,
   reported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (reporter_id) REFERENCES users(id) ON DELETE CASCADE,
   FOREIGN KEY (opponent_id) REFERENCES users(id) ON DELETE CASCADE,
   FOREIGN KEY (winner_id) REFERENCES users(id) ON DELETE CASCADE,
   UNIQUE KEY unique_match_reporter (client_match_id, reporter_id)
+);
+
+-- Une ligne par (carte, match, joueur qui l'a jouée) — voir
+-- rankedModel.recordCardPlays, appelé une seule fois par match confirmé
+-- (même court-circuit findMatchHistory que le reste de reportMatch). Sert
+-- uniquement de signal d'équilibrage (taux de jeu/winrate par carte, voir
+-- rankedModel.getTopCards) — jamais consultée pour l'autorité MMR/victoire.
+CREATE TABLE card_play_stats (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  card_name VARCHAR(150) NOT NULL,
+  client_match_id VARCHAR(100) NOT NULL,
+  user_id INT NOT NULL,
+  won BOOLEAN NOT NULL,
+  season INT NOT NULL,
+  played_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  UNIQUE KEY unique_card_match_user (card_name, client_match_id, user_id),
+  INDEX idx_card_play_stats_card_name (card_name)
 );
 
 -- Assignation/progression des 3 quêtes quotidiennes d'un joueur (le contenu

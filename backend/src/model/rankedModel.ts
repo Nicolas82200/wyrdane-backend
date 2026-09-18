@@ -25,6 +25,14 @@ interface MatchReportRow extends RowDataPacket {
 	season: number;
 	cards_played_by_race: Record<string, number> | null;
 	deck_races: string[] | null;
+	cards_played: string[] | null;
+}
+
+interface CardStatsRow extends RowDataPacket {
+	card_name: string;
+	matches_played: number;
+	instances: number;
+	wins: number;
 }
 
 interface MatchHistoryRow extends RowDataPacket {
@@ -79,11 +87,12 @@ const createReport = async (
 	winnerId: number,
 	cardsPlayedByRace: Record<string, number> | null = null,
 	deckRaces: string[] | null = null,
+	cardsPlayed: string[] | null = null,
 ): Promise<void> => {
 	await db.query(
 		`INSERT INTO match_reports
-		 (client_match_id, reporter_id, opponent_id, winner_id, season, cards_played_by_race, deck_races)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		 (client_match_id, reporter_id, opponent_id, winner_id, season, cards_played_by_race, deck_races, cards_played)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		[
 			clientMatchId,
 			reporterId,
@@ -92,8 +101,60 @@ const createReport = async (
 			CURRENT_SEASON,
 			cardsPlayedByRace ? JSON.stringify(cardsPlayedByRace) : null,
 			deckRaces ? JSON.stringify(deckRaces) : null,
+			cardsPlayed ? JSON.stringify(cardsPlayed) : null,
 		],
 	);
+};
+
+// Une ligne par (carte, match, joueur) — voir schema.sql card_play_stats.
+// Appelée une seule fois par match confirmé (même court-circuit
+// findMatchHistory que le reste de reportMatch, voir rankedController) : pas
+// de risque de double-comptage sur un retry réseau du même rapport. Échec
+// silencieux par carte individuelle plutôt que par lot : un nom de carte
+// renommé/retiré côté jeu (clé étrangère absente en pratique ici, card_name
+// n'est pas une FK vers `cards` pour rester tolérant à un léger désync de
+// nommage) ne doit jamais faire échouer la confirmation du match elle-même.
+const recordCardPlays = async (
+	clientMatchId: string,
+	userId: number,
+	cardsPlayed: string[] | null | undefined,
+	won: boolean,
+): Promise<void> => {
+	if (!cardsPlayed || cardsPlayed.length === 0) return;
+	const uniqueCardNames = [...new Set(cardsPlayed)];
+	for (const cardName of uniqueCardNames) {
+		await db.query(
+			`INSERT IGNORE INTO card_play_stats (card_name, client_match_id, user_id, won, season)
+			 VALUES (?, ?, ?, ?, ?)`,
+			[cardName, clientMatchId, userId, won, CURRENT_SEASON],
+		);
+	}
+};
+
+// Cartes les plus jouées en classé (saison courante), triées par taux de jeu
+// décroissant — voir docs/backend-contracts/card-stats-and-leaderboard.md
+// côté card-game. minMatches : seuil sous lequel une carte est exclue (trop
+// peu de données pour un winrate significatif, voir le contrat).
+const MIN_MATCHES_FOR_CARD_STATS = 20;
+
+const getTopCards = async (): Promise<{ totalRankedMatches: number; cards: CardStatsRow[] }> => {
+	const [[{ total }]] = await db.query<(RowDataPacket & { total: number })[]>(
+		"SELECT COUNT(*) AS total FROM match_history WHERE season = ?",
+		[CURRENT_SEASON],
+	);
+	const [rows] = await db.query<CardStatsRow[]>(
+		`SELECT card_name,
+		        COUNT(DISTINCT client_match_id) AS matches_played,
+		        COUNT(*) AS instances,
+		        SUM(won) AS wins
+		 FROM card_play_stats
+		 WHERE season = ?
+		 GROUP BY card_name
+		 HAVING matches_played >= ?
+		 ORDER BY matches_played DESC`,
+		[CURRENT_SEASON, MIN_MATCHES_FOR_CARD_STATS],
+	);
+	return { totalRankedMatches: total, cards: rows };
 };
 
 // Valide le match : calcule le nouveau MMR des deux joueurs, met à jour leur
@@ -223,4 +284,6 @@ export {
 	createReport,
 	confirmMatch,
 	getLeaderboard,
+	recordCardPlays,
+	getTopCards,
 };
