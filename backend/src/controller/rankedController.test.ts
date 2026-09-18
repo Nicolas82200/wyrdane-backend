@@ -8,6 +8,8 @@ vi.mock("../model/rankedModel", () => ({
 	createReport: vi.fn(),
 	confirmMatch: vi.fn(),
 	getLeaderboard: vi.fn(),
+	recordCardPlays: vi.fn(),
+	getTopCards: vi.fn(),
 }));
 vi.mock("../model/questModel", () => ({
 	progressForMatch: vi.fn(),
@@ -30,6 +32,8 @@ import {
 	createReport,
 	confirmMatch,
 	getLeaderboard,
+	recordCardPlays,
+	getTopCards,
 } from "../model/rankedModel";
 import { progressForMatch } from "../model/questModel";
 import { progressForMatch as progressWeeklyForMatch } from "../model/weeklyQuestModel";
@@ -45,6 +49,8 @@ const mocked = {
 	createReport: createReport as ReturnType<typeof vi.fn>,
 	confirmMatch: confirmMatch as ReturnType<typeof vi.fn>,
 	getLeaderboard: getLeaderboard as ReturnType<typeof vi.fn>,
+	recordCardPlays: recordCardPlays as ReturnType<typeof vi.fn>,
+	getTopCards: getTopCards as ReturnType<typeof vi.fn>,
 	progressForMatch: progressForMatch as ReturnType<typeof vi.fn>,
 	progressWeeklyForMatch: progressWeeklyForMatch as ReturnType<typeof vi.fn>,
 	progressUniqueForMatch: progressUniqueForMatch as ReturnType<typeof vi.fn>,
@@ -233,7 +239,7 @@ describe("reportMatch", () => {
 
 		await reportMatch(req, res);
 
-		expect(mocked.createReport).toHaveBeenCalledWith("m1", 1, 2, 1, null, null);
+		expect(mocked.createReport).toHaveBeenCalledWith("m1", 1, 2, 1, null, null, null);
 		expect(res.status).toHaveBeenCalledWith(202);
 		expect(mocked.confirmMatch).not.toHaveBeenCalled();
 	});
