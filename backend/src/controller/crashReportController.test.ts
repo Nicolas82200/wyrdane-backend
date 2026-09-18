@@ -21,11 +21,11 @@ const mockRes = (): Response => {
 };
 
 const validBody = {
-	crashType: "crash",
 	platform: "Windows 11",
 	gameVersion: "1.4.2",
 	reporterName: "Alice",
 	log: "ERROR: something went wrong\nSCRIPT ERROR: at battle.gd:42",
+	comment: "J'attaquais avec mon serviteur quand le jeu a figé.",
 };
 
 describe("submitCrashReport", () => {
@@ -41,6 +41,7 @@ describe("submitCrashReport", () => {
 			expect.objectContaining({
 				fields: expect.arrayContaining([
 					expect.objectContaining({ name: "Fin du log" }),
+					expect.objectContaining({ name: "Ce que faisait le joueur", value: validBody.comment }),
 				]),
 			}),
 			expect.stringContaining("Alice"),
@@ -48,14 +49,15 @@ describe("submitCrashReport", () => {
 		expect(res.sendStatus).toHaveBeenCalledWith(200);
 	});
 
-	it("rejects an unknown crash type", async () => {
-		const req = { body: { ...validBody, crashType: "not-a-type" } } as Request;
+	it("accepts a submission without a comment (optional field)", async () => {
+		const req = { body: { ...validBody, comment: undefined } } as unknown as Request;
 		const res = mockRes();
 
 		await submitCrashReport(req, res);
 
-		expect(res.status).toHaveBeenCalledWith(400);
-		expect(mocked.sendDiscordWebhook).not.toHaveBeenCalled();
+		const call = mocked.sendDiscordWebhook.mock.calls[0][0];
+		expect(call.fields.some((f: { name: string }) => f.name === "Ce que faisait le joueur")).toBe(false);
+		expect(res.sendStatus).toHaveBeenCalledWith(200);
 	});
 
 	it("rejects a submission missing the log", async () => {
@@ -70,6 +72,16 @@ describe("submitCrashReport", () => {
 
 	it("rejects an oversized log", async () => {
 		const req = { body: { ...validBody, log: "x".repeat(200_001) } } as Request;
+		const res = mockRes();
+
+		await submitCrashReport(req, res);
+
+		expect(res.status).toHaveBeenCalledWith(400);
+		expect(mocked.sendDiscordWebhook).not.toHaveBeenCalled();
+	});
+
+	it("rejects an oversized comment", async () => {
+		const req = { body: { ...validBody, comment: "x".repeat(1001) } } as Request;
 		const res = mockRes();
 
 		await submitCrashReport(req, res);
