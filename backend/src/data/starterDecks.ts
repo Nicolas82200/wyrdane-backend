@@ -5,6 +5,8 @@
 // jouable dans "Mes Decks" dès la fin du tutoriel. Composition validée contre
 // les règles du deck builder client (DeckBuilder.gd) : 40 cartes jouables
 // minimum + 10 cartes-ressource minimum, 4 exemplaires max par carte non-ressource.
+// 15 cartes-ressource par deck de départ (au-dessus du minimum) pour éviter
+// un début de partie où les nouveaux joueurs manquent de mana.
 
 export interface StarterDeckEntry {
 	name: string;
@@ -38,7 +40,7 @@ export const STARTER_DECKS: StarterDeck[] = [
 			{ name: "Hurleur Nécrotique", quantity: 2 },
 			{ name: "Rongeur de Chair", quantity: 2 },
 			{ name: "Géant Boursouflé", quantity: 2 },
-			{ name: "Chair", quantity: 10 },
+			{ name: "Chair", quantity: 15 },
 		],
 	},
 	{
@@ -61,7 +63,7 @@ export const STARTER_DECKS: StarterDeck[] = [
 			{ name: "Capitaine de Milice", quantity: 2 },
 			{ name: "Champion du Peuple", quantity: 2 },
 			{ name: "Chevalier du Mur", quantity: 2 },
-			{ name: "Sceau du Royaume", quantity: 10 },
+			{ name: "Sceau du Royaume", quantity: 15 },
 		],
 	},
 	{
@@ -84,7 +86,7 @@ export const STARTER_DECKS: StarterDeck[] = [
 			{ name: "Vague de Corruption", quantity: 2 },
 			{ name: "Cavalier des Flammes", quantity: 2 },
 			{ name: "Le Corrupteur", quantity: 1 },
-			{ name: "Âme", quantity: 10 },
+			{ name: "Âme", quantity: 15 },
 		],
 	},
 	{
@@ -107,7 +109,7 @@ export const STARTER_DECKS: StarterDeck[] = [
 			{ name: "Second Regard", quantity: 2 },
 			{ name: "Masse-Qui-Ne-Cesse", quantity: 2 },
 			{ name: "Ce-Qui-A-Trop-Poussé", quantity: 2 },
-			{ name: "Éclat d'Anomalie", quantity: 10 },
+			{ name: "Éclat d'Anomalie", quantity: 15 },
 		],
 	},
 ];
