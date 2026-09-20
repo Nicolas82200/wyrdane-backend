@@ -109,6 +109,17 @@ CREATE TABLE IF NOT EXISTS login_rewards (
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS level_rewards (
+  user_id INT NOT NULL,
+  level INT NOT NULL,
+  type ENUM('card', 'pack', 'gold') NOT NULL,
+  gold INT NOT NULL DEFAULT 0,
+  granted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  claimed_at TIMESTAMP NULL DEFAULT NULL,
+  PRIMARY KEY (user_id, level),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS match_history (
   id INT AUTO_INCREMENT PRIMARY KEY,
   client_match_id VARCHAR(100) NOT NULL UNIQUE,
