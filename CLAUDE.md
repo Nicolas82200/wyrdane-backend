@@ -131,6 +131,8 @@ Volontairement pas encore fait : objectifs par race/nombre de cartes jouées (de
 
 Table `login_rewards` (une ligne par joueur : `streak_day` + `last_claimed_date`). Pas de job planifié : `claimed_today`/`is_consecutive` sont calculés à la volée via `CURDATE()` côté SQL (jamais en comparant des dates côté app, pour éviter tout écart de fuseau horaire) — voir `loginRewardModel.fetchRow`. Récompense croissante sur 7 jours (`REWARD_BY_DAY`, 10 à 60 monnaie molle), qui boucle après le jour 7 plutôt que de plafonner ; `streak_day` en base continue lui de compter la série réelle sans plafond. Un jour manqué (dernière réclamation avant-hier ou plus tôt) reramène directement au palier 1. `GET /api/login-reward/status` (lecture seule, ne mute rien), `POST /api/login-reward/claim` (verrouillé `FOR UPDATE`, même garde-fou anti-double-réclamation que `currencyModel.debit`/`questModel.claimQuest`).
 
+`GET /api/login-reward/status` renvoie aussi `upcoming` (`loginRewardModel.getUpcomingRewards`, pure/déterministe) : les `UPCOMING_REWARDS_COUNT` (5) prochains jours à partir de `streak_day` inclus, `[{day, reward}]`, pour la frise de la popup client (voir « Récompense de connexion quotidienne » dans le `CLAUDE.md` de `card-game`). Calculé et renvoyé par le serveur à chaque appel plutôt que dupliqué côté client (`REWARD_BY_DAY`) : élimine le risque de dérive silencieuse entre les deux copies de la table de récompenses qu'aurait posé un hardcodage client — le client se contente d'afficher ce tableau tel quel.
+
 ### Quêtes hebdomadaires & parrainage
 
 Contrat d'origine (côté client, écrit avant implémentation) : `E:\card-game\docs\backend-contracts\weekly-quests-and-referral.md`.
