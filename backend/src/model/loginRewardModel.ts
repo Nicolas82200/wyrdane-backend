@@ -53,12 +53,31 @@ const fetchRow = async (userId: number, connection?: PoolConnection): Promise<Lo
 
 const nextStreakDay = (row: LoginRewardRow): number => (row.is_consecutive ? row.streak_day + 1 : 1);
 
-const getStatus = async (userId: number): Promise<{ claimed_today: boolean; streak_day: number }> => {
+const UPCOMING_REWARDS_COUNT = 5;
+
+interface UpcomingReward {
+	day: number;
+	reward: number;
+}
+
+// Aperçu des `count` prochains jours à partir de `fromDay` (inclus) — pure,
+// déterministe (rewardForDay cycle déjà sur 7 jours). Renvoyé par le backend
+// plutôt que dupliqué côté client (REWARD_BY_DAY) : la frise de la popup
+// affiche directement ce que le serveur calcule, jamais une copie qui
+// pourrait dériver silencieusement.
+const getUpcomingRewards = (fromDay: number, count: number = UPCOMING_REWARDS_COUNT): UpcomingReward[] =>
+	Array.from({ length: count }, (_, i) => {
+		const day = fromDay + i;
+		return { day, reward: rewardForDay(day) };
+	});
+
+const getStatus = async (
+	userId: number,
+): Promise<{ claimed_today: boolean; streak_day: number; upcoming: UpcomingReward[] }> => {
 	await ensureRow(userId);
 	const row = await fetchRow(userId);
-	return row.claimed_today
-		? { claimed_today: true, streak_day: row.streak_day }
-		: { claimed_today: false, streak_day: nextStreakDay(row) };
+	const streak_day = row.claimed_today ? row.streak_day : nextStreakDay(row);
+	return { claimed_today: !!row.claimed_today, streak_day, upcoming: getUpcomingRewards(streak_day) };
 };
 
 const claim = async (
@@ -91,4 +110,5 @@ const claim = async (
 	}
 };
 
-export { AlreadyClaimedTodayError, REWARD_BY_DAY, rewardForDay, getStatus, claim };
+export type { UpcomingReward };
+export { AlreadyClaimedTodayError, REWARD_BY_DAY, rewardForDay, getUpcomingRewards, getStatus, claim };

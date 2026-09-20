@@ -13,7 +13,14 @@ vi.mock("./currencyModel", () => ({
 
 import db from "./db";
 import { credit, getBalance } from "./currencyModel";
-import { AlreadyClaimedTodayError, REWARD_BY_DAY, rewardForDay, getStatus, claim } from "./loginRewardModel";
+import {
+	AlreadyClaimedTodayError,
+	REWARD_BY_DAY,
+	rewardForDay,
+	getUpcomingRewards,
+	getStatus,
+	claim,
+} from "./loginRewardModel";
 
 const mockedDb = db as unknown as { query: ReturnType<typeof vi.fn>; getConnection: ReturnType<typeof vi.fn> };
 const mockedCredit = credit as ReturnType<typeof vi.fn>;
@@ -40,6 +47,28 @@ describe("rewardForDay", () => {
 	});
 });
 
+describe("getUpcomingRewards", () => {
+	it("returns 5 consecutive days by default, starting at fromDay", () => {
+		expect(getUpcomingRewards(1)).toEqual([
+			{ day: 1, reward: REWARD_BY_DAY[0] },
+			{ day: 2, reward: REWARD_BY_DAY[1] },
+			{ day: 3, reward: REWARD_BY_DAY[2] },
+			{ day: 4, reward: REWARD_BY_DAY[3] },
+			{ day: 5, reward: REWARD_BY_DAY[4] },
+		]);
+	});
+
+	it("cycles the reward through the 7-day table across the wrap", () => {
+		expect(getUpcomingRewards(6)).toEqual([
+			{ day: 6, reward: REWARD_BY_DAY[5] },
+			{ day: 7, reward: REWARD_BY_DAY[6] },
+			{ day: 8, reward: REWARD_BY_DAY[0] },
+			{ day: 9, reward: REWARD_BY_DAY[1] },
+			{ day: 10, reward: REWARD_BY_DAY[2] },
+		]);
+	});
+});
+
 describe("getStatus", () => {
 	beforeEach(() => vi.clearAllMocks());
 
@@ -48,7 +77,7 @@ describe("getStatus", () => {
 
 		const status = await getStatus(1);
 
-		expect(status).toEqual({ claimed_today: false, streak_day: 1 });
+		expect(status).toEqual({ claimed_today: false, streak_day: 1, upcoming: getUpcomingRewards(1) });
 	});
 
 	it("reports the stored streak as claimed when already claimed today", async () => {
@@ -56,7 +85,7 @@ describe("getStatus", () => {
 
 		const status = await getStatus(1);
 
-		expect(status).toEqual({ claimed_today: true, streak_day: 3 });
+		expect(status).toEqual({ claimed_today: true, streak_day: 3, upcoming: getUpcomingRewards(3) });
 	});
 
 	it("bumps the streak by one when the last claim was yesterday", async () => {
@@ -66,7 +95,7 @@ describe("getStatus", () => {
 
 		const status = await getStatus(1);
 
-		expect(status).toEqual({ claimed_today: false, streak_day: 4 });
+		expect(status).toEqual({ claimed_today: false, streak_day: 4, upcoming: getUpcomingRewards(4) });
 	});
 
 	it("resets the streak to 1 when a day was missed", async () => {
@@ -76,7 +105,7 @@ describe("getStatus", () => {
 
 		const status = await getStatus(1);
 
-		expect(status).toEqual({ claimed_today: false, streak_day: 1 });
+		expect(status).toEqual({ claimed_today: false, streak_day: 1, upcoming: getUpcomingRewards(1) });
 	});
 });
 
