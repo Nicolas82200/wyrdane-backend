@@ -3,18 +3,21 @@ import type { Request, Response } from "express";
 
 vi.mock("../model/packModel", () => ({
 	openPack: vi.fn(),
+	buyPacks: vi.fn(),
 	PACK_COST: 500,
+	MAX_BUY_QUANTITY: 50,
 }));
 vi.mock("../model/uniqueQuestModel", () => ({
 	progressForPackOpen: vi.fn(),
 }));
 
-import { openPack } from "../model/packModel";
+import { openPack, buyPacks } from "../model/packModel";
 import { progressForPackOpen } from "../model/uniqueQuestModel";
 import { InsufficientFundsError } from "../model/currencyModel";
-import { openPackHandler, openFreePackHandler } from "./packController";
+import { openPackHandler, openFreePackHandler, buyPacksHandler } from "./packController";
 
 const mockedOpenPack = openPack as ReturnType<typeof vi.fn>;
+const mockedBuyPacks = buyPacks as ReturnType<typeof vi.fn>;
 const mockedProgressForPackOpen = progressForPackOpen as ReturnType<typeof vi.fn>;
 
 const mockRes = (): Response => {
@@ -91,5 +94,48 @@ describe("openFreePackHandler", () => {
 		await openFreePackHandler(req, res);
 
 		expect(mockedOpenPack).toHaveBeenCalledWith(1, true);
+	});
+});
+
+describe("buyPacksHandler", () => {
+	beforeEach(() => vi.resetAllMocks());
+
+	it("rejects unauthenticated requests", async () => {
+		const req = { user: undefined, body: { quantity: 1 } } as unknown as Request;
+		const res = mockRes();
+		await buyPacksHandler(req, res);
+		expect(res.status).toHaveBeenCalledWith(401);
+	});
+
+	it("rejects a non-integer or out-of-range quantity without calling buyPacks", async () => {
+		const res = mockRes();
+		for (const quantity of [0, -1, 51, 2.5, "abc"]) {
+			await buyPacksHandler({ user: { id: 1 }, body: { quantity } } as unknown as Request, res);
+			expect(res.status).toHaveBeenCalledWith(400);
+		}
+		expect(mockedBuyPacks).not.toHaveBeenCalled();
+	});
+
+	it("buys the requested quantity and returns the new balance/free_packs, without opening anything", async () => {
+		mockedBuyPacks.mockResolvedValue({ balance: 4000, free_packs: 5 });
+		const req = { user: { id: 1 }, body: { quantity: 5 } } as unknown as Request;
+		const res = mockRes();
+
+		await buyPacksHandler(req, res);
+
+		expect(mockedBuyPacks).toHaveBeenCalledWith(1, 5);
+		expect(res.status).toHaveBeenCalledWith(200);
+		expect(res.json).toHaveBeenCalledWith({ balance: 4000, free_packs: 5 });
+	});
+
+	it("surfaces InsufficientFundsError as a 400 with the pack cost", async () => {
+		mockedBuyPacks.mockRejectedValue(new InsufficientFundsError());
+		const req = { user: { id: 1 }, body: { quantity: 3 } } as unknown as Request;
+		const res = mockRes();
+
+		await buyPacksHandler(req, res);
+
+		expect(res.status).toHaveBeenCalledWith(400);
+		expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining("500") }));
 	});
 });

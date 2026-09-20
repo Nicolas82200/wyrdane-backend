@@ -1,6 +1,6 @@
 import { Request, Response } from "express";
 
-import { openPack, openOwnedPack, PACK_COST } from "../model/packModel";
+import { openPack, openOwnedPack, buyPacks, PACK_COST, MAX_BUY_QUANTITY } from "../model/packModel";
 import { InsufficientFundsError, InsufficientFreePacksError } from "../model/currencyModel";
 import { progressForPackOpen } from "../model/uniqueQuestModel";
 import { getUserId } from "../helper/requestUser";
@@ -63,4 +63,34 @@ const openOwnedPackHandler = async (req: Request, res: Response): Promise<void> 
 	}
 };
 
-export { openPackHandler, openFreePackHandler, openOwnedPackHandler };
+// Achat sans ouverture (voir CLAUDE.md côté card-game, refonte Boutique/
+// Collection) : débite `quantity` packs d'un coup et les crédite au stock —
+// l'ouverture elle-même reste réservée à /open-owned, appelée ensuite par le
+// client depuis l'onglet Collection.
+const buyPacksHandler = async (req: Request, res: Response): Promise<void> => {
+	try {
+		const userId = getUserId(req);
+		if (!userId) {
+			res.status(401).json({ message: "Non authentifié" });
+			return;
+		}
+
+		const quantity = Number(req.body?.quantity);
+		if (!Number.isInteger(quantity) || quantity < 1 || quantity > MAX_BUY_QUANTITY) {
+			res.status(400).json({ message: `Quantité invalide (1 à ${MAX_BUY_QUANTITY})` });
+			return;
+		}
+
+		const { balance, free_packs } = await buyPacks(userId, quantity);
+		res.status(200).json({ balance, free_packs });
+	} catch (error) {
+		if (error instanceof InsufficientFundsError) {
+			res.status(400).json({ message: `Solde insuffisant (coût : ${PACK_COST})` });
+			return;
+		}
+		console.error(error);
+		res.status(500).json({ message: "Server error" });
+	}
+};
+
+export { openPackHandler, openFreePackHandler, openOwnedPackHandler, buyPacksHandler };

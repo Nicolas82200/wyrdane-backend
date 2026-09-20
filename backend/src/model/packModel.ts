@@ -2,13 +2,16 @@ import type { RowDataPacket } from "mysql2";
 import type { PoolConnection } from "mysql2/promise";
 import db from "./db";
 import { grantCard, getOwnedQuantity, MAX_COPIES_PER_CARD, DUST_VALUE_BY_RARITY } from "./collectionModel";
-import { credit, debit, debitFreePack, getBalance, getFreePacks } from "./currencyModel";
+import { credit, debit, debitFreePack, creditFreePacks, getBalance, getFreePacks } from "./currencyModel";
 import { progressForPackOpen } from "./uniqueQuestModel";
 
 import type { Cards } from "../types";
 
 const PACK_COST = 500;
 const CARDS_PER_PACK = 4;
+// Achat en une seule requête (voir buyPacks) : plafond raisonnable, aligné sur
+// le rate-limit de la route /buy plutôt que sur une vraie limite métier.
+const MAX_BUY_QUANTITY = 50;
 
 // Pondération de tirage par rareté (somme non contrainte à 100, seul le
 // ratio compte). Ajuster ici seul suffit à retoucher l'économie des packs.
@@ -155,4 +158,27 @@ const openOwnedPack = async (userId: number): Promise<{ cards: DrawResult[]; fre
 	}
 };
 
-export { PACK_COST, CARDS_PER_PACK, RARITY_WEIGHTS, openPack, openOwnedPack };
+// Achète `quantity` packs SANS les ouvrir : débite le coût total d'un coup et
+// crédite autant de packs au stock du joueur (même compteur que les packs
+// gratuits — voir currencyModel.creditFreePacks/getFreePacks. Le stock ne
+// distingue plus l'origine d'un pack une fois en stock ; seule l'ouverture,
+// via openOwnedPack, les consomme ensuite, un par un côté client comme pour
+// les packs gratuits). Transaction unique comme openPack : débit et crédit ne
+// doivent jamais être partiels.
+const buyPacks = async (userId: number, quantity: number): Promise<{ balance: number; free_packs: number }> => {
+	const connection = await db.getConnection();
+	try {
+		await connection.beginTransaction();
+		await debit(userId, PACK_COST * quantity, "pack_buy", undefined, connection);
+		await creditFreePacks(userId, quantity, connection);
+		await connection.commit();
+		return { balance: await getBalance(userId), free_packs: await getFreePacks(userId) };
+	} catch (error) {
+		await connection.rollback();
+		throw error;
+	} finally {
+		connection.release();
+	}
+};
+
+export { PACK_COST, CARDS_PER_PACK, MAX_BUY_QUANTITY, RARITY_WEIGHTS, openPack, openOwnedPack, buyPacks };
