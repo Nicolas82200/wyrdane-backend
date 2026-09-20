@@ -121,6 +121,7 @@ const dropUsernameUniqueIndex = async (connection: mysql.Connection): Promise<vo
 const MATCH_REPORTS_COLUMNS_TO_ENSURE: { name: string; ddl: string }[] = [
 	{ name: "cards_played_by_race", ddl: "cards_played_by_race JSON NULL" },
 	{ name: "deck_races", ddl: "deck_races JSON NULL" },
+	{ name: "cards_played", ddl: "cards_played JSON NULL" },
 ];
 
 const ensureMatchReportsColumns = async (connection: mysql.Connection): Promise<void> => {

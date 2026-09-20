@@ -133,11 +133,25 @@ CREATE TABLE IF NOT EXISTS match_reports (
   season INT NOT NULL,
   cards_played_by_race JSON NULL,
   deck_races JSON NULL,
+  cards_played JSON NULL,
   reported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (reporter_id) REFERENCES users(id) ON DELETE CASCADE,
   FOREIGN KEY (opponent_id) REFERENCES users(id) ON DELETE CASCADE,
   FOREIGN KEY (winner_id) REFERENCES users(id) ON DELETE CASCADE,
   UNIQUE KEY unique_match_reporter (client_match_id, reporter_id)
+);
+
+CREATE TABLE IF NOT EXISTS card_play_stats (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  card_name VARCHAR(150) NOT NULL,
+  client_match_id VARCHAR(100) NOT NULL,
+  user_id INT NOT NULL,
+  won BOOLEAN NOT NULL,
+  season INT NOT NULL,
+  played_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  UNIQUE KEY unique_card_match_user (card_name, client_match_id, user_id),
+  INDEX idx_card_play_stats_card_name (card_name)
 );
 
 CREATE TABLE IF NOT EXISTS daily_quests (

@@ -7,8 +7,10 @@ import {
 	createReport,
 	confirmMatch,
 	getLeaderboard,
+	recordCardPlays,
+	getTopCards,
 } from "../model/rankedModel";
-import { sanitizeCardsPlayedByRace, sanitizeDeckRaces } from "../helper/matchPayload";
+import { sanitizeCardsPlayedByRace, sanitizeDeckRaces, sanitizeCardsPlayed } from "../helper/matchPayload";
 import { verifyMatchSessionToken } from "../helper/matchSessionToken";
 import { progressForMatch } from "../model/questModel";
 import { progressForMatch as progressWeeklyForMatch } from "../model/weeklyQuestModel";
@@ -30,6 +32,7 @@ const reportMatch = async (req: Request, res: Response): Promise<void> => {
 			winnerId?: number;
 			cardsPlayedByRace?: Record<string, number>;
 			deckRaces?: string[];
+			cardsPlayed?: string[];
 			matchSessionToken?: string;
 		};
 		const { clientMatchId, opponentId, winnerId, matchSessionToken } = rawBody;
@@ -72,6 +75,7 @@ const reportMatch = async (req: Request, res: Response): Promise<void> => {
 		// ne peut plus fausser plusieurs quêtes/plusieurs races d'un coup.
 		const cardsPlayedByRace = sanitizeCardsPlayedByRace(rawBody.cardsPlayedByRace);
 		const deckRaces = sanitizeDeckRaces(rawBody.deckRaces);
+		const cardsPlayed = sanitizeCardsPlayed(rawBody.cardsPlayed);
 
 		const existingMatch = await findMatchHistory(clientMatchId);
 		if (existingMatch) {
@@ -99,7 +103,7 @@ const reportMatch = async (req: Request, res: Response): Promise<void> => {
 			return;
 		}
 
-		await createReport(clientMatchId, userId, opponentId, winnerId, cardsPlayedByRace ?? null, deckRaces ?? null);
+		await createReport(clientMatchId, userId, opponentId, winnerId, cardsPlayedByRace ?? null, deckRaces ?? null, cardsPlayed ?? null);
 
 		const opponentReport = await findReport(clientMatchId, opponentId);
 		if (!opponentReport) {
@@ -126,6 +130,8 @@ const reportMatch = async (req: Request, res: Response): Promise<void> => {
 		// Chaque joueur ne fait progresser ses quêtes de race qu'avec les données
 		// qu'il a lui-même déclarées dans son propre rapport (jamais celles de
 		// l'adversaire, qui ne connaît pas son deck).
+		await recordCardPlays(clientMatchId, userId, cardsPlayed, winnerId === userId);
+		await recordCardPlays(clientMatchId, opponentId, opponentReport.cards_played ?? undefined, winnerId === opponentId);
 		await progressForMatch(userId, "ranked", winnerId === userId, { cardsPlayedByRace, deckRaces });
 		await progressForMatch(opponentId, "ranked", winnerId === opponentId, {
 			cardsPlayedByRace: opponentReport.cards_played_by_race ?? undefined,
@@ -180,4 +186,22 @@ const getLeaderboardHandler = async (req: Request, res: Response): Promise<void>
 	}
 };
 
-export { reportMatch, getMyStats, getLeaderboardHandler };
+// Voir docs/backend-contracts/card-stats-and-leaderboard.md côté card-game
+// (StatsPanel.gd, écran "Statistiques" du menu principal) — équilibrage.
+const getTopCardsHandler = async (_req: Request, res: Response): Promise<void> => {
+	try {
+		const { totalRankedMatches, cards } = await getTopCards();
+		const cardsWithRates = cards.map((row) => ({
+			card_name: row.card_name,
+			play_rate: totalRankedMatches > 0 ? row.matches_played / totalRankedMatches : 0,
+			matches_played: row.matches_played,
+			winrate: row.instances > 0 ? row.wins / row.instances : 0,
+		}));
+		res.status(200).json({ total_ranked_matches: totalRankedMatches, cards: cardsWithRates });
+	} catch (error) {
+		console.error(error);
+		res.status(500).json({ message: "Server error" });
+	}
+};
+
+export { reportMatch, getMyStats, getLeaderboardHandler, getTopCardsHandler };
