@@ -79,7 +79,7 @@ const createReport = async (req: Request, res: Response): Promise<void> => {
 			`${TYPE_LABELS[type]} par ${reporterUsername}`,
 		);
 
-		res.sendStatus(200);
+		res.status(200).json({ success: true });
 	} catch (error) {
 		console.error(error);
 		res.status(500).json({ message: "Server error" });

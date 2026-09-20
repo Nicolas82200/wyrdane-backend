@@ -45,7 +45,7 @@ const submitCrashReport = async (req: Request, res: Response): Promise<void> => 
 		const { platform, gameVersion, reporterName, log, comment, website } = req.body as CrashReportBody;
 
 		if (website) {
-			res.sendStatus(200);
+			res.status(200).json({ success: true });
 			return;
 		}
 
@@ -84,7 +84,7 @@ const submitCrashReport = async (req: Request, res: Response): Promise<void> => 
 			{ filename: `crash-log-${Date.now()}.txt`, content: log },
 		);
 
-		res.sendStatus(200);
+		res.status(200).json({ success: true });
 	} catch (error) {
 		console.error(error);
 		res.status(500).json({ message: "Server error" });
