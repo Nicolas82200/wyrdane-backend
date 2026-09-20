@@ -200,6 +200,29 @@ CREATE TABLE login_rewards (
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
+-- Une ligne par récompense de niveau réellement octroyée (voir
+-- levelModel.grantLevelReward, appelé dans applyXp dès qu'un palier est
+-- franchi) : l'octroi (crédit d'or/carte/pack) reste immédiat et automatique
+-- comme avant, cette table ne fait que le journaliser pour que le client
+-- puisse l'afficher plus tard dans la popup de récompenses de niveau et le
+-- marquer comme "vu" (claimed_at) — claimed_at ne déclenche aucun nouveau
+-- crédit, c'est un simple accusé de réception côté joueur (voir
+-- levelModel.claimRewards). Pas de card_id : la carte précise obtenue n'est
+-- jamais affichée (même convention que GameOverScreen.show_xp_reward côté
+-- client, qui n'affiche que la rareté) ; celle-ci est de toute façon
+-- déterministe à partir du niveau (voir rewardKindForLevel), inutile de la
+-- dupliquer ici.
+CREATE TABLE level_rewards (
+  user_id INT NOT NULL,
+  level INT NOT NULL,
+  type ENUM('card', 'pack', 'gold') NOT NULL,
+  gold INT NOT NULL DEFAULT 0,
+  granted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  claimed_at TIMESTAMP NULL DEFAULT NULL,
+  PRIMARY KEY (user_id, level),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
 -- Un match confirmé n'existe ici qu'une fois que les deux rapports (voir
 -- match_reports) concordent sur le vainqueur.
 CREATE TABLE match_history (
