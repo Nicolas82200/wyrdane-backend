@@ -9,8 +9,8 @@ const calculateElo = (
 	const expectedA = 1 / (1 + 10 ** ((ratingB - ratingA) / 400));
 	const expectedB = 1 - expectedA;
 
-	const newRatingA = Math.round(ratingA + K_FACTOR * (scoreA - expectedA));
-	const newRatingB = Math.round(ratingB + K_FACTOR * (1 - scoreA - expectedB));
+	const newRatingA = Math.max(0, Math.round(ratingA + K_FACTOR * (scoreA - expectedA)));
+	const newRatingB = Math.max(0, Math.round(ratingB + K_FACTOR * (1 - scoreA - expectedB)));
 
 	return { newRatingA, newRatingB };
 };

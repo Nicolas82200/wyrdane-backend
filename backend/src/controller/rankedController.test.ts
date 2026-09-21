@@ -18,6 +18,9 @@ vi.mock("../model/questModel", () => ({
 vi.mock("../model/weeklyQuestModel", () => ({
 	progressForMatch: vi.fn(),
 }));
+vi.mock("../model/monthlyQuestModel", () => ({
+	progressForMatch: vi.fn(),
+}));
 vi.mock("../model/uniqueQuestModel", () => ({
 	progressForMatch: vi.fn(),
 	progressForRankTier: vi.fn(),
@@ -39,6 +42,7 @@ import {
 } from "../model/rankedModel";
 import { progressForMatch } from "../model/questModel";
 import { progressForMatch as progressWeeklyForMatch } from "../model/weeklyQuestModel";
+import { progressForMatch as progressMonthlyForMatch } from "../model/monthlyQuestModel";
 import { progressForMatch as progressUniqueForMatch, progressForRankTier } from "../model/uniqueQuestModel";
 import { getLevel } from "../model/levelModel";
 import { issueMatchSessionToken } from "../helper/matchSessionToken";
@@ -62,6 +66,7 @@ const mocked = {
 	recordCardPlays: recordCardPlays as ReturnType<typeof vi.fn>,
 	progressForMatch: progressForMatch as ReturnType<typeof vi.fn>,
 	progressWeeklyForMatch: progressWeeklyForMatch as ReturnType<typeof vi.fn>,
+	progressMonthlyForMatch: progressMonthlyForMatch as ReturnType<typeof vi.fn>,
 	progressUniqueForMatch: progressUniqueForMatch as ReturnType<typeof vi.fn>,
 	progressForRankTier: progressForRankTier as ReturnType<typeof vi.fn>,
 	getLevel: getLevel as ReturnType<typeof vi.fn>,

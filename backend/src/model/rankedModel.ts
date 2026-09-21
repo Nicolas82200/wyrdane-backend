@@ -5,7 +5,7 @@ import { applyXp, XP_LOSS_NETWORK, winXpForStreak } from "./levelModel";
 import type { LevelReward } from "./levelModel";
 
 const CURRENT_SEASON = 1;
-const DEFAULT_MMR = 1000;
+const DEFAULT_MMR = 0;
 
 interface RankedStatsRow extends RowDataPacket {
 	user_id: number;
