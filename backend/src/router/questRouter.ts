@@ -2,6 +2,7 @@ import { Router } from "express";
 
 import { getMyDailyQuests, claimMyQuest } from "../controller/questController";
 import { getMyWeeklyQuests, claimMyWeeklyQuest } from "../controller/weeklyQuestController";
+import { getMyMonthlyQuests, claimMyMonthlyQuest } from "../controller/monthlyQuestController";
 import { getMyUniqueQuests, claimMyUniqueQuest } from "../controller/uniqueQuestController";
 import rateLimit from "../middleware/rateLimit";
 
@@ -12,6 +13,8 @@ const claimLimit = rateLimit({ windowMs: 10 * 60 * 1000, max: 30, name: "quests:
 router.get("/daily", getMyDailyQuests);
 router.get("/weekly", getMyWeeklyQuests);
 router.post("/weekly/:id/claim", claimLimit, claimMyWeeklyQuest);
+router.get("/monthly", getMyMonthlyQuests);
+router.post("/monthly/:id/claim", claimLimit, claimMyMonthlyQuest);
 router.get("/unique", getMyUniqueQuests);
 router.post("/unique/:id/claim", claimLimit, claimMyUniqueQuest);
 router.post("/:id/claim", claimLimit, claimMyQuest);

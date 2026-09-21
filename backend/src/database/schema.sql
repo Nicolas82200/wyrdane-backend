@@ -7,6 +7,7 @@ DROP TABLE IF EXISTS decks;
 DROP TABLE IF EXISTS user_cards;
 DROP TABLE IF EXISTS daily_quests;
 DROP TABLE IF EXISTS weekly_quests;
+DROP TABLE IF EXISTS monthly_quests;
 DROP TABLE IF EXISTS unique_quests;
 DROP TABLE IF EXISTS referrals;
 DROP TABLE IF EXISTS login_rewards;
@@ -329,6 +330,26 @@ CREATE TABLE weekly_quests (
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
   UNIQUE KEY unique_user_quest_week_slot (user_id, week_start, slot)
+);
+
+-- Quêtes mensuelles : même principe que weekly_quests (rotation par slot,
+-- reset périodique) mais objectifs plus longs et récompense double (or +
+-- packs, comme unique_quests) pour une grosse récompense mensuelle.
+-- month_start = 1er du mois courant (calculé côté SQL, jamais côté JS).
+CREATE TABLE monthly_quests (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  user_id INT NOT NULL,
+  month_start DATE NOT NULL,
+  slot TINYINT NOT NULL,
+  quest_code VARCHAR(30) NOT NULL,
+  progress INT NOT NULL DEFAULT 0,
+  target INT NOT NULL,
+  reward_currency INT NOT NULL DEFAULT 0,
+  reward_pack INT NOT NULL DEFAULT 0,
+  claimed_at TIMESTAMP NULL DEFAULT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  UNIQUE KEY unique_user_quest_month_slot (user_id, month_start, slot)
 );
 
 -- Quêtes uniques (one-shot) : contrairement à daily_quests/weekly_quests,
