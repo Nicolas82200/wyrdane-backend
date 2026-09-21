@@ -138,7 +138,7 @@ CREATE TABLE deck_cards (
 -- match (voir levelModel.ts), distinct de `wins` qui ne fait qu'accumuler.
 CREATE TABLE ranked_stats (
   user_id INT PRIMARY KEY,
-  mmr INT NOT NULL DEFAULT 1000,
+  mmr INT NOT NULL DEFAULT 0,
   wins INT NOT NULL DEFAULT 0,
   losses INT NOT NULL DEFAULT 0,
   win_streak INT NOT NULL DEFAULT 0,
