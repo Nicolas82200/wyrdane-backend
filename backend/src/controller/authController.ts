@@ -10,6 +10,7 @@ import {
 } from "../model/userModel";
 import { grantAllCards } from "../model/collectionModel";
 import { recordLogin } from "../model/analyticsModel";
+import { progressForLogin } from "../model/monthlyQuestModel";
 import { encodeJWT } from "../helper/jwtHelper";
 
 // Retrouve (ou crée) le joueur associé à un steamid et pose le cookie de
@@ -40,6 +41,9 @@ const loginWithSteamId = async (
 	);
 	Promise.resolve(ensureAdminFromEnv(user.id, steamId)).catch((error) =>
 		console.error("ensureAdminFromEnv failed", error),
+	);
+	Promise.resolve(progressForLogin(user.id)).catch((error) =>
+		console.error("progressForLogin failed", error),
 	);
 
 	// Pseudo réel affiché plutôt que le nom générique posé à la création

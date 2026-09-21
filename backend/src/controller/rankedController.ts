@@ -13,6 +13,7 @@ import { sanitizeCardsPlayedByRace, sanitizeDeckRaces, sanitizeCardsPlayed } fro
 import { verifyMatchSessionToken } from "../helper/matchSessionToken";
 import { progressForMatch } from "../model/questModel";
 import { progressForMatch as progressWeeklyForMatch } from "../model/weeklyQuestModel";
+import { progressForMatch as progressMonthlyForMatch } from "../model/monthlyQuestModel";
 import { progressForMatch as progressUniqueForMatch, progressForRankTier } from "../model/uniqueQuestModel";
 import { getLevel } from "../model/levelModel";
 import { getUserId } from "../helper/requestUser";
@@ -138,6 +139,11 @@ const reportMatch = async (req: Request, res: Response): Promise<void> => {
 		});
 		await progressWeeklyForMatch(userId, "ranked", winnerId === userId, { cardsPlayedByRace, deckRaces });
 		await progressWeeklyForMatch(opponentId, "ranked", winnerId === opponentId, {
+			cardsPlayedByRace: opponentReport.cards_played_by_race ?? undefined,
+			deckRaces: opponentReport.deck_races ?? undefined,
+		});
+		await progressMonthlyForMatch(userId, "ranked", winnerId === userId, { cardsPlayedByRace, deckRaces });
+		await progressMonthlyForMatch(opponentId, "ranked", winnerId === opponentId, {
 			cardsPlayedByRace: opponentReport.cards_played_by_race ?? undefined,
 			deckRaces: opponentReport.deck_races ?? undefined,
 		});

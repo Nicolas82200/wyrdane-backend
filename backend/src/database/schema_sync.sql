@@ -195,6 +195,23 @@ CREATE TABLE IF NOT EXISTS weekly_quests (
   UNIQUE KEY unique_user_quest_week_slot (user_id, week_start, slot)
 );
 
+CREATE TABLE IF NOT EXISTS monthly_quests (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  user_id INT NOT NULL,
+  month_start DATE NOT NULL,
+  slot TINYINT NOT NULL,
+  quest_code VARCHAR(30) NOT NULL,
+  progress INT NOT NULL DEFAULT 0,
+  target INT NOT NULL,
+  reward_currency INT NOT NULL DEFAULT 0,
+  reward_pack INT NOT NULL DEFAULT 0,
+  last_progress_date DATE NULL DEFAULT NULL,
+  claimed_at TIMESTAMP NULL DEFAULT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  UNIQUE KEY unique_user_quest_month_slot (user_id, month_start, slot)
+);
+
 CREATE TABLE IF NOT EXISTS unique_quests (
   id INT AUTO_INCREMENT PRIMARY KEY,
   user_id INT NOT NULL,

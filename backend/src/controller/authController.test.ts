@@ -21,6 +21,9 @@ vi.mock("../model/collectionModel", () => ({
 vi.mock("../model/analyticsModel", () => ({
 	recordLogin: vi.fn().mockResolvedValue(undefined),
 }));
+vi.mock("../model/monthlyQuestModel", () => ({
+	progressForLogin: vi.fn().mockResolvedValue(undefined),
+}));
 vi.mock("../helper/jwtHelper", () => ({
 	encodeJWT: vi.fn(() => "signed.jwt.token"),
 }));
