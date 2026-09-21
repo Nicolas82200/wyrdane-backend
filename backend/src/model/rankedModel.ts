@@ -133,11 +133,11 @@ const recordCardPlays = async (
 
 // Cartes les plus jouées en classé (saison courante), triées par taux de jeu
 // décroissant — voir docs/backend-contracts/card-stats-and-leaderboard.md
-// côté card-game. minMatches : seuil sous lequel une carte est exclue (trop
-// peu de données pour un winrate significatif, voir le contrat).
-const MIN_MATCHES_FOR_CARD_STATS = 20;
-
-const getTopCards = async (): Promise<{ totalRankedMatches: number; cards: CardStatsRow[] }> => {
+// côté card-game. Réservé au dashboard admin (wyrdane-website, /admin) :
+// pas de seuil minimum de parties ici (contrairement à l'ancienne route
+// joueur) — un admin doit pouvoir juger lui-même de la significativité d'un
+// winrate via `matches_played`, y compris en tout début de saison.
+const getCardStats = async (): Promise<{ totalRankedMatches: number; cards: CardStatsRow[] }> => {
 	const [[{ total }]] = await db.query<(RowDataPacket & { total: number })[]>(
 		"SELECT COUNT(*) AS total FROM match_history WHERE season = ?",
 		[CURRENT_SEASON],
@@ -150,9 +150,8 @@ const getTopCards = async (): Promise<{ totalRankedMatches: number; cards: CardS
 		 FROM card_play_stats
 		 WHERE season = ?
 		 GROUP BY card_name
-		 HAVING matches_played >= ?
 		 ORDER BY matches_played DESC`,
-		[CURRENT_SEASON, MIN_MATCHES_FOR_CARD_STATS],
+		[CURRENT_SEASON],
 	);
 	return { totalRankedMatches: total, cards: rows };
 };
@@ -285,5 +284,5 @@ export {
 	confirmMatch,
 	getLeaderboard,
 	recordCardPlays,
-	getTopCards,
+	getCardStats,
 };

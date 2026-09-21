@@ -9,7 +9,6 @@ vi.mock("../model/rankedModel", () => ({
 	confirmMatch: vi.fn(),
 	getLeaderboard: vi.fn(),
 	recordCardPlays: vi.fn(),
-	getTopCards: vi.fn(),
 }));
 vi.mock("../model/questModel", () => ({
 	progressForMatch: vi.fn(),
@@ -33,7 +32,6 @@ import {
 	confirmMatch,
 	getLeaderboard,
 	recordCardPlays,
-	getTopCards,
 } from "../model/rankedModel";
 import { progressForMatch } from "../model/questModel";
 import { progressForMatch as progressWeeklyForMatch } from "../model/weeklyQuestModel";
@@ -50,7 +48,6 @@ const mocked = {
 	confirmMatch: confirmMatch as ReturnType<typeof vi.fn>,
 	getLeaderboard: getLeaderboard as ReturnType<typeof vi.fn>,
 	recordCardPlays: recordCardPlays as ReturnType<typeof vi.fn>,
-	getTopCards: getTopCards as ReturnType<typeof vi.fn>,
 	progressForMatch: progressForMatch as ReturnType<typeof vi.fn>,
 	progressWeeklyForMatch: progressWeeklyForMatch as ReturnType<typeof vi.fn>,
 	progressUniqueForMatch: progressUniqueForMatch as ReturnType<typeof vi.fn>,

@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 
 import { getStats, setWishlistCount } from "../model/analyticsModel";
+import { getCardStats } from "../model/rankedModel";
 
 // Ping simple pour que le site sache s'il doit afficher le lien vers le
 // dashboard : n'est atteignable qu'après authorization + requireAdmin, donc
@@ -38,4 +39,25 @@ const updateWishlistCount = async (req: Request, res: Response): Promise<void> =
 	}
 };
 
-export { me, getAdminStats, updateWishlistCount };
+// Cartes les plus jouées en classé + winrate (équilibrage) — voir
+// docs/backend-contracts/card-stats-and-leaderboard.md côté card-game.
+// Anciennement une route joueur (/api/ranked/stats/cards/top, avec un seuil
+// minimum de 20 parties) déplacée ici : pas d'écran en jeu, dashboard admin
+// (wyrdane-website /admin) uniquement, sans seuil — voir getCardStats.
+const getAdminCardStats = async (req: Request, res: Response): Promise<void> => {
+	try {
+		const { totalRankedMatches, cards } = await getCardStats();
+		const cardsWithRates = cards.map((row) => ({
+			card_name: row.card_name,
+			play_rate: totalRankedMatches > 0 ? row.matches_played / totalRankedMatches : 0,
+			matches_played: row.matches_played,
+			winrate: row.instances > 0 ? row.wins / row.instances : 0,
+		}));
+		res.status(200).json({ total_ranked_matches: totalRankedMatches, cards: cardsWithRates });
+	} catch (error) {
+		console.error(error);
+		res.status(500).json({ message: "Server error" });
+	}
+};
+
+export { me, getAdminStats, updateWishlistCount, getAdminCardStats };
