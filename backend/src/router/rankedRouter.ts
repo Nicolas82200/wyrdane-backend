@@ -1,11 +1,22 @@
 import { Router } from "express";
 
-import { reportMatch, getMyStats, getLeaderboardHandler } from "../controller/rankedController";
+import {
+	reportMatch,
+	getMyStats,
+	getLeaderboardHandler,
+	getMyLeaderboardPositionHandler,
+	searchLeaderboardHandler,
+} from "../controller/rankedController";
 import rateLimit from "../middleware/rateLimit";
 
 const router = Router();
 
 router.get("/me", getMyStats);
+// Ordre important : routes littérales avant "/leaderboard" pour ne jamais
+// être capturées par un futur param dynamique - pas de conflit actuel mais
+// garde l'habitude.
+router.get("/leaderboard/me", getMyLeaderboardPositionHandler);
+router.get("/leaderboard/search", searchLeaderboardHandler);
 router.get("/leaderboard", getLeaderboardHandler);
 // Un client rappelle légitimement cette route plusieurs fois par match (202
 // pending en attendant le rapport du pair, voir MatchResultReporter côté
