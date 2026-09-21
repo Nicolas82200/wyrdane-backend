@@ -310,6 +310,32 @@ const getMyLeaderboardPosition = async (userId: number): Promise<LeaderboardRow 
 	return rows[0] ?? null;
 };
 
+// Page centrée sur la position du joueur authentifié au sein d'un palier
+// (bornes minMmr/maxMmr) — évite au client de devoir reconstituer un offset
+// depuis un rang global : le serveur compte directement combien de joueurs du
+// palier ont un MMR strictement supérieur au sien pour centrer la page.
+// null si le joueur n'a encore aucune ligne ranked_stats (jamais classé).
+const getLeaderboardAroundUser = async (
+	userId: number,
+	pageSize: number,
+	minMmr?: number,
+	maxMmr?: number,
+): Promise<{ total: number; offset: number; players: LeaderboardRow[] } | null> => {
+	const me = await getMyLeaderboardPosition(userId);
+	if (!me) return null;
+	const hasMin = typeof minMmr === "number";
+	const hasMax = typeof maxMmr === "number";
+	const boundParams = [...(hasMin ? [minMmr] : []), ...(hasMax ? [maxMmr] : [])];
+	const boundClause = `${hasMin ? "AND mmr >= ?" : ""} ${hasMax ? "AND mmr < ?" : ""}`;
+	const [[{ before }]] = await db.query<(RowDataPacket & { before: number })[]>(
+		`SELECT COUNT(*) AS before FROM ranked_stats WHERE season = ? AND mmr > ? ${boundClause}`,
+		[CURRENT_SEASON, me.mmr, ...boundParams],
+	);
+	const offset = Math.max(0, before - Math.floor(pageSize / 2));
+	const { total, players } = await getLeaderboard(pageSize, offset, minMmr, maxMmr);
+	return { total, offset, players };
+};
+
 // Recherche par pseudo (sous-chaîne, insensible à la casse) — bornée à 20
 // résultats, utilisée par la barre de recherche du classement pour retrouver
 // le rang exact d'un joueur (voir StatsPanel.gd côté card-game).
@@ -330,6 +356,7 @@ export {
 	confirmMatch,
 	getLeaderboard,
 	getMyLeaderboardPosition,
+	getLeaderboardAroundUser,
 	searchLeaderboard,
 	recordCardPlays,
 	getCardStats,

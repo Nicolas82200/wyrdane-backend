@@ -8,6 +8,7 @@ import {
 	confirmMatch,
 	getLeaderboard,
 	getMyLeaderboardPosition,
+	getLeaderboardAroundUser,
 	searchLeaderboard,
 	recordCardPlays,
 } from "../model/rankedModel";
@@ -210,6 +211,29 @@ const getMyLeaderboardPositionHandler = async (req: Request, res: Response): Pro
 	}
 };
 
+const getLeaderboardAroundMeHandler = async (req: Request, res: Response): Promise<void> => {
+	try {
+		const userId = getUserId(req);
+		if (!userId) {
+			res.status(401).json({ message: "Non authentifié" });
+			return;
+		}
+		const limit = Math.min(Number(req.query.limit) || 21, 100);
+		const minMmr = req.query.minMmr !== undefined ? Number(req.query.minMmr) : undefined;
+		const maxMmr = req.query.maxMmr !== undefined ? Number(req.query.maxMmr) : undefined;
+
+		const page = await getLeaderboardAroundUser(userId, limit, minMmr, maxMmr);
+		if (!page) {
+			res.status(404).json({ message: "Non classé" });
+			return;
+		}
+		res.status(200).json(page);
+	} catch (error) {
+		console.error(error);
+		res.status(500).json({ message: "Server error" });
+	}
+};
+
 const searchLeaderboardHandler = async (req: Request, res: Response): Promise<void> => {
 	try {
 		const query = String(req.query.q ?? "").trim().slice(0, 50);
@@ -225,4 +249,11 @@ const searchLeaderboardHandler = async (req: Request, res: Response): Promise<vo
 	}
 };
 
-export { reportMatch, getMyStats, getLeaderboardHandler, getMyLeaderboardPositionHandler, searchLeaderboardHandler };
+export {
+	reportMatch,
+	getMyStats,
+	getLeaderboardHandler,
+	getMyLeaderboardPositionHandler,
+	getLeaderboardAroundMeHandler,
+	searchLeaderboardHandler,
+};

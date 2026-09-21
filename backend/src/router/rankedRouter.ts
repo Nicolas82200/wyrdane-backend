@@ -5,6 +5,7 @@ import {
 	getMyStats,
 	getLeaderboardHandler,
 	getMyLeaderboardPositionHandler,
+	getLeaderboardAroundMeHandler,
 	searchLeaderboardHandler,
 } from "../controller/rankedController";
 import rateLimit from "../middleware/rateLimit";
@@ -16,6 +17,7 @@ router.get("/me", getMyStats);
 // être capturées par un futur param dynamique - pas de conflit actuel mais
 // garde l'habitude.
 router.get("/leaderboard/me", getMyLeaderboardPositionHandler);
+router.get("/leaderboard/around-me", getLeaderboardAroundMeHandler);
 router.get("/leaderboard/search", searchLeaderboardHandler);
 router.get("/leaderboard", getLeaderboardHandler);
 // Un client rappelle légitimement cette route plusieurs fois par match (202
