@@ -8,6 +8,8 @@ vi.mock("../model/rankedModel", () => ({
 	createReport: vi.fn(),
 	confirmMatch: vi.fn(),
 	getLeaderboard: vi.fn(),
+	getMyLeaderboardPosition: vi.fn(),
+	searchLeaderboard: vi.fn(),
 	recordCardPlays: vi.fn(),
 }));
 vi.mock("../model/questModel", () => ({
@@ -34,6 +36,8 @@ import {
 	createReport,
 	confirmMatch,
 	getLeaderboard,
+	getMyLeaderboardPosition,
+	searchLeaderboard,
 	recordCardPlays,
 } from "../model/rankedModel";
 import { progressForMatch } from "../model/questModel";
@@ -42,7 +46,13 @@ import { progressForMatch as progressMonthlyForMatch } from "../model/monthlyQue
 import { progressForMatch as progressUniqueForMatch, progressForRankTier } from "../model/uniqueQuestModel";
 import { getLevel } from "../model/levelModel";
 import { issueMatchSessionToken } from "../helper/matchSessionToken";
-import { reportMatch, getMyStats, getLeaderboardHandler } from "./rankedController";
+import {
+	reportMatch,
+	getMyStats,
+	getLeaderboardHandler,
+	getMyLeaderboardPositionHandler,
+	searchLeaderboardHandler,
+} from "./rankedController";
 
 const mocked = {
 	getStats: getStats as ReturnType<typeof vi.fn>,
@@ -51,6 +61,8 @@ const mocked = {
 	createReport: createReport as ReturnType<typeof vi.fn>,
 	confirmMatch: confirmMatch as ReturnType<typeof vi.fn>,
 	getLeaderboard: getLeaderboard as ReturnType<typeof vi.fn>,
+	getMyLeaderboardPosition: getMyLeaderboardPosition as ReturnType<typeof vi.fn>,
+	searchLeaderboard: searchLeaderboard as ReturnType<typeof vi.fn>,
 	recordCardPlays: recordCardPlays as ReturnType<typeof vi.fn>,
 	progressForMatch: progressForMatch as ReturnType<typeof vi.fn>,
 	progressWeeklyForMatch: progressWeeklyForMatch as ReturnType<typeof vi.fn>,
@@ -403,22 +415,91 @@ describe("getLeaderboardHandler", () => {
 	beforeEach(() => vi.resetAllMocks());
 
 	it("caps the requested page size at 100", async () => {
-		mocked.getLeaderboard.mockResolvedValue([]);
+		mocked.getLeaderboard.mockResolvedValue({ total: 0, players: [] });
 		const req = { query: { limit: "9999", offset: "0" } } as unknown as Request;
 		const res = mockRes();
 
 		await getLeaderboardHandler(req, res);
 
-		expect(mocked.getLeaderboard).toHaveBeenCalledWith(100, 0);
+		expect(mocked.getLeaderboard).toHaveBeenCalledWith(100, 0, undefined, undefined);
 	});
 
 	it("falls back to sane defaults for missing/invalid query params", async () => {
-		mocked.getLeaderboard.mockResolvedValue([]);
+		mocked.getLeaderboard.mockResolvedValue({ total: 0, players: [] });
 		const req = { query: {} } as unknown as Request;
 		const res = mockRes();
 
 		await getLeaderboardHandler(req, res);
 
-		expect(mocked.getLeaderboard).toHaveBeenCalledWith(50, 0);
+		expect(mocked.getLeaderboard).toHaveBeenCalledWith(50, 0, undefined, undefined);
+	});
+
+	it("forwards minMmr/maxMmr tier bounds to the model", async () => {
+		mocked.getLeaderboard.mockResolvedValue({ total: 0, players: [] });
+		const req = { query: { minMmr: "1300", maxMmr: "1600" } } as unknown as Request;
+		const res = mockRes();
+
+		await getLeaderboardHandler(req, res);
+
+		expect(mocked.getLeaderboard).toHaveBeenCalledWith(50, 0, 1300, 1600);
+	});
+});
+
+describe("getMyLeaderboardPositionHandler", () => {
+	beforeEach(() => vi.resetAllMocks());
+
+	it("returns 401 when not authenticated", async () => {
+		const req = { query: {} } as unknown as Request;
+		const res = mockRes();
+
+		await getMyLeaderboardPositionHandler(req, res);
+
+		expect(res.status).toHaveBeenCalledWith(401);
+	});
+
+	it("returns 404 when the player is unranked", async () => {
+		mocked.getMyLeaderboardPosition.mockResolvedValue(null);
+		const req = reqAs(1, {});
+		const res = mockRes();
+
+		await getMyLeaderboardPositionHandler(req, res);
+
+		expect(res.status).toHaveBeenCalledWith(404);
+	});
+
+	it("returns the player's rank row when ranked", async () => {
+		mocked.getMyLeaderboardPosition.mockResolvedValue({ user_id: 1, mmr: 1500, rank: 42 });
+		const req = reqAs(1, {});
+		const res = mockRes();
+
+		await getMyLeaderboardPositionHandler(req, res);
+
+		expect(res.status).toHaveBeenCalledWith(200);
+		expect(res.json).toHaveBeenCalledWith({ user_id: 1, mmr: 1500, rank: 42 });
+	});
+});
+
+describe("searchLeaderboardHandler", () => {
+	beforeEach(() => vi.resetAllMocks());
+
+	it("returns an empty array for a blank query without hitting the model", async () => {
+		const req = { query: { q: "  " } } as unknown as Request;
+		const res = mockRes();
+
+		await searchLeaderboardHandler(req, res);
+
+		expect(mocked.searchLeaderboard).not.toHaveBeenCalled();
+		expect(res.json).toHaveBeenCalledWith([]);
+	});
+
+	it("forwards a trimmed query to the model", async () => {
+		mocked.searchLeaderboard.mockResolvedValue([{ user_id: 2, username: "Foo" }]);
+		const req = { query: { q: "Foo" } } as unknown as Request;
+		const res = mockRes();
+
+		await searchLeaderboardHandler(req, res);
+
+		expect(mocked.searchLeaderboard).toHaveBeenCalledWith("Foo");
+		expect(res.status).toHaveBeenCalledWith(200);
 	});
 });

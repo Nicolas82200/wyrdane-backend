@@ -259,18 +259,90 @@ const confirmMatch = async (
 	}
 };
 
+type LeaderboardRow = RankedStatsRow & { username: string; steam_id: string | null; rank: number };
+
+// steam_id via LEFT JOIN (pas de garantie qu'un compte a toujours un lien
+// Steam actif) — sert côté client à demander l'avatar Steamworks du joueur
+// (voir docs/backend-contracts/leaderboard-browse.md côté card-game).
+// `rank` calculé en SQL (fenêtre ordonnée par mmr desc sur TOUTE la saison,
+// pas seulement la page demandée) pour rester correct quels que soient
+// minMmr/maxMmr/offset — jamais dérivable d'un simple index de tableau côté
+// client une fois qu'on filtre par palier.
+const LEADERBOARD_SELECT = `
+	SELECT rs.user_id, rs.mmr, rs.wins, rs.losses, rs.season, u.username, la.external_id AS steam_id,
+	       RANK() OVER (ORDER BY rs.mmr DESC) AS \`rank\`
+	FROM ranked_stats rs
+	JOIN users u ON u.id = rs.user_id
+	LEFT JOIN linked_accounts la ON la.user_id = rs.user_id AND la.provider = 'steam'
+	WHERE rs.season = ?
+`;
+
 const getLeaderboard = async (
 	limit: number,
 	offset: number,
-): Promise<(RankedStatsRow & { username: string })[]> => {
-	const [rows] = await db.query<(RankedStatsRow & { username: string } & RowDataPacket)[]>(
-		`SELECT rs.user_id, rs.mmr, rs.wins, rs.losses, rs.season, u.username
-		 FROM ranked_stats rs
-		 JOIN users u ON u.id = rs.user_id
-		 WHERE rs.season = ?
-		 ORDER BY rs.mmr DESC
+	minMmr?: number,
+	maxMmr?: number,
+): Promise<{ total: number; players: LeaderboardRow[] }> => {
+	const hasMin = typeof minMmr === "number";
+	const hasMax = typeof maxMmr === "number";
+	const [[{ total }]] = await db.query<(RowDataPacket & { total: number })[]>(
+		`SELECT COUNT(*) AS total FROM ranked_stats WHERE season = ?
+		 ${hasMin ? "AND mmr >= ?" : ""} ${hasMax ? "AND mmr < ?" : ""}`,
+		[CURRENT_SEASON, ...(hasMin ? [minMmr] : []), ...(hasMax ? [maxMmr] : [])],
+	);
+	const [rows] = await db.query<(LeaderboardRow & RowDataPacket)[]>(
+		`SELECT * FROM (${LEADERBOARD_SELECT}) ranked
+		 ${hasMin || hasMax ? `WHERE ${[hasMin ? "mmr >= ?" : null, hasMax ? "mmr < ?" : null].filter(Boolean).join(" AND ")}` : ""}
+		 ORDER BY mmr DESC
 		 LIMIT ? OFFSET ?`,
-		[CURRENT_SEASON, limit, offset],
+		[CURRENT_SEASON, ...(hasMin ? [minMmr] : []), ...(hasMax ? [maxMmr] : []), limit, offset],
+	);
+	return { total, players: rows };
+};
+
+// Position du joueur authentifié dans le classement de la saison courante —
+// null si non classé (aucune ligne ranked_stats, jamais joué de match classé).
+const getMyLeaderboardPosition = async (userId: number): Promise<LeaderboardRow | null> => {
+	const [rows] = await db.query<(LeaderboardRow & RowDataPacket)[]>(
+		`SELECT * FROM (${LEADERBOARD_SELECT}) ranked WHERE user_id = ?`,
+		[CURRENT_SEASON, userId],
+	);
+	return rows[0] ?? null;
+};
+
+// Page centrée sur la position du joueur authentifié au sein d'un palier
+// (bornes minMmr/maxMmr) — évite au client de devoir reconstituer un offset
+// depuis un rang global : le serveur compte directement combien de joueurs du
+// palier ont un MMR strictement supérieur au sien pour centrer la page.
+// null si le joueur n'a encore aucune ligne ranked_stats (jamais classé).
+const getLeaderboardAroundUser = async (
+	userId: number,
+	pageSize: number,
+	minMmr?: number,
+	maxMmr?: number,
+): Promise<{ total: number; offset: number; players: LeaderboardRow[] } | null> => {
+	const me = await getMyLeaderboardPosition(userId);
+	if (!me) return null;
+	const hasMin = typeof minMmr === "number";
+	const hasMax = typeof maxMmr === "number";
+	const boundParams = [...(hasMin ? [minMmr] : []), ...(hasMax ? [maxMmr] : [])];
+	const boundClause = `${hasMin ? "AND mmr >= ?" : ""} ${hasMax ? "AND mmr < ?" : ""}`;
+	const [[{ before }]] = await db.query<(RowDataPacket & { before: number })[]>(
+		`SELECT COUNT(*) AS before FROM ranked_stats WHERE season = ? AND mmr > ? ${boundClause}`,
+		[CURRENT_SEASON, me.mmr, ...boundParams],
+	);
+	const offset = Math.max(0, before - Math.floor(pageSize / 2));
+	const { total, players } = await getLeaderboard(pageSize, offset, minMmr, maxMmr);
+	return { total, offset, players };
+};
+
+// Recherche par pseudo (sous-chaîne, insensible à la casse) — bornée à 20
+// résultats, utilisée par la barre de recherche du classement pour retrouver
+// le rang exact d'un joueur (voir StatsPanel.gd côté card-game).
+const searchLeaderboard = async (query: string): Promise<LeaderboardRow[]> => {
+	const [rows] = await db.query<(LeaderboardRow & RowDataPacket)[]>(
+		`SELECT * FROM (${LEADERBOARD_SELECT}) ranked WHERE username LIKE ? ORDER BY mmr DESC LIMIT 20`,
+		[CURRENT_SEASON, `%${query}%`],
 	);
 	return rows;
 };
@@ -283,6 +355,9 @@ export {
 	createReport,
 	confirmMatch,
 	getLeaderboard,
+	getMyLeaderboardPosition,
+	getLeaderboardAroundUser,
+	searchLeaderboard,
 	recordCardPlays,
 	getCardStats,
 };
