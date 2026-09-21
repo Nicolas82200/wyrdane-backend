@@ -6,9 +6,15 @@ import { credit, getBalance, creditFreePacks, getFreePacks } from "./currencyMod
 // reset périodique) mais objectifs nettement plus longs et récompense
 // double (or + packs, comme uniqueQuestModel) pour marquer le coup une fois
 // par mois — voir "Quêtes mensuelles" dans CLAUDE.md.
+//
+// Slot QUESTS_PER_MONTH (le dernier) n'est PAS tiré au sort : il porte
+// toujours LOGIN_STREAK_TEMPLATE, la plus grosse récompense du mois, pour
+// inciter à se connecter chaque jour — contrairement aux autres objectifs
+// (alimentés par progressForMatch), celui-ci progresse via progressForLogin,
+// appelé à chaque connexion réussie (authController.loginWithSteamId).
 interface MonthlyQuestTemplate {
 	code: string;
-	objective: "play" | "win" | "win_network" | "play_race" | "play_multirace";
+	objective: "play_network" | "win_network" | "play_race" | "play_multirace" | "login";
 	target: number;
 	rewardCurrency: number;
 	rewardPack: number;
@@ -31,29 +37,51 @@ const raceQuestTemplates = (): MonthlyQuestTemplate[] =>
 		descriptionKey: `QUEST_MONTHLY_PLAY_RACE_${race.toUpperCase()}_60`,
 	}));
 
+// Pool tiré au sort, QUESTS_PER_MONTH templates par mois (voir
+// pickTemplatesFor) — n'inclut jamais LOGIN_STREAK_TEMPLATE, toujours assigné
+// à part sur son propre slot fixe.
 const MONTHLY_QUEST_TEMPLATES: MonthlyQuestTemplate[] = [
-	{ code: "play_100", objective: "play", target: 100, rewardCurrency: 500, rewardPack: 2, descriptionKey: "QUEST_MONTHLY_PLAY_100" },
-	{ code: "win_50", objective: "win", target: 50, rewardCurrency: 700, rewardPack: 3, descriptionKey: "QUEST_MONTHLY_WIN_50" },
 	{
-		code: "win_network_30",
-		objective: "win_network",
-		target: 30,
-		rewardCurrency: 800,
-		rewardPack: 3,
-		descriptionKey: "QUEST_MONTHLY_WIN_NETWORK_30",
+		code: "play_network_100",
+		objective: "play_network",
+		target: 100,
+		rewardCurrency: 500,
+		rewardPack: 2,
+		descriptionKey: "QUEST_MONTHLY_PLAY_NETWORK_100",
 	},
 	{
-		code: "play_multirace_25",
+		code: "win_network_50",
+		objective: "win_network",
+		target: 50,
+		rewardCurrency: 800,
+		rewardPack: 3,
+		descriptionKey: "QUEST_MONTHLY_WIN_NETWORK_50",
+	},
+	{
+		code: "play_multirace_75",
 		objective: "play_multirace",
-		target: 25,
-		rewardCurrency: 600,
-		rewardPack: 2,
-		descriptionKey: "QUEST_MONTHLY_PLAY_MULTIRACE_25",
+		target: 75,
+		rewardCurrency: 700,
+		rewardPack: 3,
+		descriptionKey: "QUEST_MONTHLY_PLAY_MULTIRACE_75",
 	},
 	...raceQuestTemplates(),
 ];
 
+// Slot fixe, jamais tiré au sort : toujours assigné, toujours la plus grosse
+// récompense du mois (voir commentaire d'en-tête).
+const LOGIN_STREAK_TEMPLATE: MonthlyQuestTemplate = {
+	code: "login_streak_30",
+	objective: "login",
+	target: 30,
+	rewardCurrency: 1000,
+	rewardPack: 4,
+	descriptionKey: "QUEST_MONTHLY_LOGIN_STREAK_30",
+};
+
 const QUESTS_PER_MONTH = 2;
+// Slot du quest fixe (login), juste après les slots tirés au sort.
+const LOGIN_STREAK_SLOT = QUESTS_PER_MONTH;
 
 interface MonthlyQuestRow extends RowDataPacket {
 	id: number;
@@ -65,6 +93,7 @@ interface MonthlyQuestRow extends RowDataPacket {
 	target: number;
 	reward_currency: number;
 	reward_pack: number;
+	last_progress_date: string | null;
 	claimed_at: string | null;
 }
 
@@ -103,7 +132,9 @@ class MonthlyQuestAlreadyClaimedError extends Error {
 }
 
 const templateByCode = (code: string): MonthlyQuestTemplate | undefined =>
-	MONTHLY_QUEST_TEMPLATES.find((template) => template.code === code);
+	code === LOGIN_STREAK_TEMPLATE.code
+		? LOGIN_STREAK_TEMPLATE
+		: MONTHLY_QUEST_TEMPLATES.find((template) => template.code === code);
 
 // Numéro de mois écoulé depuis l'epoch : sert uniquement de graine de
 // rotation (pas exposée), n'a pas besoin de s'aligner sur le 1er du mois
@@ -139,6 +170,21 @@ const ensureThisMonthQuests = async (userId: number): Promise<MonthlyQuestRow[]>
 			[userId, slot, template.code, template.target, template.rewardCurrency, template.rewardPack],
 		);
 	}
+	// Slot fixe (jamais tiré au sort) : toujours la quête de connexion, plus
+	// grosse récompense du mois.
+	await db.query(
+		`INSERT INTO monthly_quests (user_id, month_start, slot, quest_code, progress, target, reward_currency, reward_pack)
+		 VALUES (?, ${MONTH_START_SQL}, ?, ?, 0, ?, ?, ?)
+		 ON DUPLICATE KEY UPDATE user_id = user_id`,
+		[
+			userId,
+			LOGIN_STREAK_SLOT,
+			LOGIN_STREAK_TEMPLATE.code,
+			LOGIN_STREAK_TEMPLATE.target,
+			LOGIN_STREAK_TEMPLATE.rewardCurrency,
+			LOGIN_STREAK_TEMPLATE.rewardPack,
+		],
+	);
 	const [rows] = await db.query<MonthlyQuestRow[]>(
 		`SELECT * FROM monthly_quests WHERE user_id = ? AND month_start = ${MONTH_START_SQL} ORDER BY slot`,
 		[userId],
@@ -177,7 +223,10 @@ interface MatchRaceData {
 // Fait progresser les quêtes mensuelles actives concernées par ce résultat
 // de match — même point d'entrée que questModel.progressForMatch/
 // weeklyQuestModel.progressForMatch (appelé juste à côté, depuis les mêmes
-// controllers, aucune nouvelle télémétrie).
+// controllers, aucune nouvelle télémétrie). "play_network"/"win_network"
+// réutilisent le mode "ranked" déjà transmis pour TOUT match multijoueur
+// (classé ou partie rapide, voir rankedController.reportMatch) — même
+// convention que weeklyQuestModel.win_network.
 const progressForMatch = async (
 	userId: number,
 	mode: "solo" | "ranked",
@@ -190,9 +239,7 @@ const progressForMatch = async (
 		const template = templateByCode(quest.quest_code);
 		if (!template) continue;
 
-		if (template.objective === "play") {
-			await db.query("UPDATE monthly_quests SET progress = LEAST(progress + 1, target) WHERE id = ?", [quest.id]);
-		} else if (template.objective === "win" && won) {
+		if (template.objective === "play_network" && mode === "ranked") {
 			await db.query("UPDATE monthly_quests SET progress = LEAST(progress + 1, target) WHERE id = ?", [quest.id]);
 		} else if (template.objective === "win_network" && won && mode === "ranked") {
 			await db.query("UPDATE monthly_quests SET progress = LEAST(progress + 1, target) WHERE id = ?", [quest.id]);
@@ -205,6 +252,24 @@ const progressForMatch = async (
 			await db.query("UPDATE monthly_quests SET progress = LEAST(progress + 1, target) WHERE id = ?", [quest.id]);
 		}
 	}
+};
+
+// Appelé à chaque connexion réussie (authController.loginWithSteamId, fire-
+// and-forget comme recordLogin/ensureAdminFromEnv juste à côté) : fait
+// progresser la quête de connexion d'au plus 1 par jour calendaire, quel que
+// soit le nombre de lancements du jeu ce jour-là — last_progress_date sert
+// de verrou (la condition dans le WHERE rend l'UPDATE naturellement
+// idempotent le même jour, pas besoin de transaction).
+const progressForLogin = async (userId: number): Promise<void> => {
+	const quests = await ensureThisMonthQuests(userId);
+	const quest = quests.find((q) => q.quest_code === LOGIN_STREAK_TEMPLATE.code);
+	if (!quest || quest.claimed_at !== null || quest.progress >= quest.target) return;
+	await db.query(
+		`UPDATE monthly_quests
+		 SET progress = LEAST(progress + 1, target), last_progress_date = CURDATE()
+		 WHERE id = ? AND (last_progress_date IS NULL OR last_progress_date <> CURDATE())`,
+		[quest.id],
+	);
 };
 
 const claimMonthlyQuest = async (
@@ -247,11 +312,13 @@ const claimMonthlyQuest = async (
 
 export {
 	MONTHLY_QUEST_TEMPLATES,
+	LOGIN_STREAK_TEMPLATE,
 	MonthlyQuestNotFoundError,
 	MonthlyQuestNotCompletedError,
 	MonthlyQuestAlreadyClaimedError,
 	ensureThisMonthQuests,
 	getMonthlyQuests,
 	progressForMatch,
+	progressForLogin,
 	claimMonthlyQuest,
 };

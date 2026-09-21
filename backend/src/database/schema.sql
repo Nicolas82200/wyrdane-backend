@@ -334,7 +334,11 @@ CREATE TABLE weekly_quests (
 
 -- Quêtes mensuelles : même principe que weekly_quests (rotation par slot,
 -- reset périodique) mais objectifs plus longs et récompense double (or +
--- packs, comme unique_quests) pour une grosse récompense mensuelle.
+-- packs, comme unique_quests) pour une grosse récompense mensuelle. Le
+-- dernier slot (LOGIN_STREAK_SLOT côté monthlyQuestModel) n'est jamais tiré
+-- au sort : toujours la quête de connexion quotidienne, plus grosse
+-- récompense du mois. last_progress_date sert de verrou anti-double-compte
+-- le même jour pour cette quête (NULL/inutilisé pour les autres objectifs).
 -- month_start = 1er du mois courant (calculé côté SQL, jamais côté JS).
 CREATE TABLE monthly_quests (
   id INT AUTO_INCREMENT PRIMARY KEY,
@@ -346,6 +350,7 @@ CREATE TABLE monthly_quests (
   target INT NOT NULL,
   reward_currency INT NOT NULL DEFAULT 0,
   reward_pack INT NOT NULL DEFAULT 0,
+  last_progress_date DATE NULL DEFAULT NULL,
   claimed_at TIMESTAMP NULL DEFAULT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,

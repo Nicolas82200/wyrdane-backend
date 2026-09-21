@@ -205,6 +205,7 @@ CREATE TABLE IF NOT EXISTS monthly_quests (
   target INT NOT NULL,
   reward_currency INT NOT NULL DEFAULT 0,
   reward_pack INT NOT NULL DEFAULT 0,
+  last_progress_date DATE NULL DEFAULT NULL,
   claimed_at TIMESTAMP NULL DEFAULT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
