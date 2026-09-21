@@ -11,6 +11,7 @@ import collectionRouter from "./collectionRouter";
 import contactRouter from "./contactRouter";
 import crashReportRouter from "./crashReportRouter";
 import currencyRouter from "./currencyRouter";
+import debugRouter from "./debugRouter";
 import deckRouter from "./deckRouter";
 import levelRouter from "./levelRouter";
 import loginRewardRouter from "./loginRewardRouter";
@@ -42,6 +43,10 @@ router.use("/collection", authorization, requireCsrfHeader, collectionRouter);
 router.use("/contact", contactRouter);
 router.use("/crash-report", crashReportRouter);
 router.use("/currency", authorization, requireCsrfHeader, currencyRouter);
+// Diagnostic TEMPORAIRE (voir debugRouter.ts) : pas d'authorization/CSRF, la
+// clé statique x-debug-key en tient lieu — à retirer une fois le diagnostic
+// matchmaking classé terminé.
+router.use("/debug", debugRouter);
 router.use("/decks", authorization, requireCsrfHeader, deckRouter);
 router.use("/level", authorization, requireCsrfHeader, levelRouter);
 router.use("/login-reward", authorization, requireCsrfHeader, loginRewardRouter);
