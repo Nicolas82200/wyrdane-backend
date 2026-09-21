@@ -277,7 +277,7 @@ CREATE TABLE match_reports (
 -- rankedModel.recordCardPlays, appelé une seule fois par match confirmé
 -- (même court-circuit findMatchHistory que le reste de reportMatch). Sert
 -- uniquement de signal d'équilibrage (taux de jeu/winrate par carte, voir
--- rankedModel.getTopCards) — jamais consultée pour l'autorité MMR/victoire.
+-- rankedModel.getCardStats) — jamais consultée pour l'autorité MMR/victoire.
 CREATE TABLE card_play_stats (
   id INT AUTO_INCREMENT PRIMARY KEY,
   card_name VARCHAR(150) NOT NULL,

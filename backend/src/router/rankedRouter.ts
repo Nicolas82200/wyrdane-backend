@@ -1,18 +1,12 @@
 import { Router } from "express";
 
-import {
-	reportMatch,
-	getMyStats,
-	getLeaderboardHandler,
-	getTopCardsHandler,
-} from "../controller/rankedController";
+import { reportMatch, getMyStats, getLeaderboardHandler } from "../controller/rankedController";
 import rateLimit from "../middleware/rateLimit";
 
 const router = Router();
 
 router.get("/me", getMyStats);
 router.get("/leaderboard", getLeaderboardHandler);
-router.get("/stats/cards/top", getTopCardsHandler);
 // Un client rappelle légitimement cette route plusieurs fois par match (202
 // pending en attendant le rapport du pair, voir MatchResultReporter côté
 // client) : fenêtre large pour ne pas gêner les retries normaux, tout en

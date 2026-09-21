@@ -8,7 +8,6 @@ import {
 	confirmMatch,
 	getLeaderboard,
 	recordCardPlays,
-	getTopCards,
 } from "../model/rankedModel";
 import { sanitizeCardsPlayedByRace, sanitizeDeckRaces, sanitizeCardsPlayed } from "../helper/matchPayload";
 import { verifyMatchSessionToken } from "../helper/matchSessionToken";
@@ -186,22 +185,4 @@ const getLeaderboardHandler = async (req: Request, res: Response): Promise<void>
 	}
 };
 
-// Voir docs/backend-contracts/card-stats-and-leaderboard.md côté card-game
-// (StatsPanel.gd, écran "Statistiques" du menu principal) — équilibrage.
-const getTopCardsHandler = async (_req: Request, res: Response): Promise<void> => {
-	try {
-		const { totalRankedMatches, cards } = await getTopCards();
-		const cardsWithRates = cards.map((row) => ({
-			card_name: row.card_name,
-			play_rate: totalRankedMatches > 0 ? row.matches_played / totalRankedMatches : 0,
-			matches_played: row.matches_played,
-			winrate: row.instances > 0 ? row.wins / row.instances : 0,
-		}));
-		res.status(200).json({ total_ranked_matches: totalRankedMatches, cards: cardsWithRates });
-	} catch (error) {
-		console.error(error);
-		res.status(500).json({ message: "Server error" });
-	}
-};
-
-export { reportMatch, getMyStats, getLeaderboardHandler, getTopCardsHandler };
+export { reportMatch, getMyStats, getLeaderboardHandler };
