@@ -153,9 +153,36 @@ const getIncomingRequests = async (userId: number): Promise<IncomingRequestRow[]
 	return rows;
 };
 
+// Borne le nombre de SteamID64 résolus en un seul appel — la liste d'amis
+// Steam d'un joueur reste de toute façon plafonnée dans les faits (quelques
+// centaines maximum), cette limite protège juste contre un payload construit
+// à la main pour énumérer massivement des comptes.
+const MAX_STEAM_IDS = 200;
+
+// Résout une liste de SteamID64 (amis Steam locaux du joueur, voir
+// SteamService.get_steam_friend_ids côté client) vers les comptes Wyrdane
+// correspondants — sert à afficher "Amis Steam" dans FriendsPanel.gd sans que
+// le joueur ait à chercher chacun par pseudo. excludeUserId retire le joueur
+// lui-même du résultat (son propre SteamID64 peut apparaître dans sa liste
+// d'amis Steam selon l'API, jamais pertinent ici).
+const resolveSteamIds = async (steamIds: string[], excludeUserId: number): Promise<SearchResultRow[]> => {
+	const bounded = steamIds.slice(0, MAX_STEAM_IDS);
+	if (bounded.length === 0) return [];
+	const placeholders = bounded.map(() => "?").join(", ");
+	const [rows] = await db.query<SearchResultRow[]>(
+		`SELECT u.id, u.username, la.external_id AS steam_id
+		 FROM users u
+		 JOIN linked_accounts la ON la.user_id = u.id AND la.provider = 'steam'
+		 WHERE la.external_id IN (${placeholders}) AND u.id != ?`,
+		[...bounded, excludeUserId],
+	);
+	return rows;
+};
+
 export {
 	ONLINE_WINDOW_SECONDS,
 	searchUsers,
+	resolveSteamIds,
 	findFriendship,
 	sendFriendRequest,
 	acceptFriendRequest,

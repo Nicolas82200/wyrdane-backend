@@ -14,6 +14,7 @@ import {
 	acceptFriendRequest,
 	deleteFriendship,
 	getFriends,
+	resolveSteamIds,
 } from "./friendModel";
 
 const mockedDb = db as unknown as { query: ReturnType<typeof vi.fn> };
@@ -121,5 +122,44 @@ describe("getFriends", () => {
 		const [sql, params] = mockedDb.query.mock.calls[0];
 		expect(sql).toContain("FROM friendships");
 		expect(params).toEqual([90, 42, 42, 42]);
+	});
+});
+
+describe("resolveSteamIds", () => {
+	beforeEach(() => vi.clearAllMocks());
+
+	it("returns an empty array without querying when given an empty list", async () => {
+		const result = await resolveSteamIds([], 1);
+		expect(result).toEqual([]);
+		expect(mockedDb.query).not.toHaveBeenCalled();
+	});
+
+	it("queries with the ids as placeholders plus the excluded caller id", async () => {
+		mockedDb.query.mockResolvedValueOnce([[]]);
+
+		await resolveSteamIds(["111", "222"], 1);
+
+		const [sql, params] = mockedDb.query.mock.calls[0];
+		expect(sql).toContain("IN (?, ?)");
+		expect(params).toEqual(["111", "222", 1]);
+	});
+
+	it("caps the list at MAX_STEAM_IDS entries", async () => {
+		mockedDb.query.mockResolvedValueOnce([[]]);
+		const tooMany = Array.from({ length: 250 }, (_, i) => String(i));
+
+		await resolveSteamIds(tooMany, 1);
+
+		const [, params] = mockedDb.query.mock.calls[0];
+		// 200 ids + l'id exclu
+		expect(params).toHaveLength(201);
+	});
+
+	it("returns the matched Wyrdane accounts", async () => {
+		mockedDb.query.mockResolvedValueOnce([[{ id: 2, username: "Rival", steam_id: "222" }]]);
+
+		const result = await resolveSteamIds(["222"], 1);
+
+		expect(result).toEqual([{ id: 2, username: "Rival", steam_id: "222" }]);
 	});
 });
