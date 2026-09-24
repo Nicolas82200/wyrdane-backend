@@ -253,7 +253,7 @@ describe("reportMatch", () => {
 
 		await reportMatch(req, res);
 
-		expect(mocked.createReport).toHaveBeenCalledWith("m1", 1, 2, 1, null, null, null);
+		expect(mocked.createReport).toHaveBeenCalledWith("m1", 1, 2, 1, null, null, null, "ranked");
 		expect(res.status).toHaveBeenCalledWith(202);
 		expect(mocked.confirmMatch).not.toHaveBeenCalled();
 	});
@@ -291,7 +291,7 @@ describe("reportMatch", () => {
 		mocked.findMatchHistory.mockResolvedValue(null);
 		mocked.findReport
 			.mockResolvedValueOnce(null)
-			.mockResolvedValueOnce({ opponent_id: 1, winner_id: 1 });
+			.mockResolvedValueOnce({ opponent_id: 1, winner_id: 1, mode: "ranked" });
 		mocked.confirmMatch.mockResolvedValue({
 			xpGained: 50,
 			level: 4,
@@ -306,7 +306,7 @@ describe("reportMatch", () => {
 
 		await reportMatch(req, res);
 
-		expect(mocked.confirmMatch).toHaveBeenCalledWith("m1", 1, 2, 1);
+		expect(mocked.confirmMatch).toHaveBeenCalledWith("m1", 1, 2, 1, "ranked");
 		expect(res.status).toHaveBeenCalledWith(200);
 		expect(res.json).toHaveBeenCalledWith(
 			expect.objectContaining({ status: "confirmed", xpGained: 50, level: 4, xp: 5, xpToNext: 130, rewards: [] }),
@@ -317,7 +317,7 @@ describe("reportMatch", () => {
 		mocked.findMatchHistory.mockResolvedValue(null);
 		mocked.findReport
 			.mockResolvedValueOnce(null)
-			.mockResolvedValueOnce({ opponent_id: 1, winner_id: 1 });
+			.mockResolvedValueOnce({ opponent_id: 1, winner_id: 1, mode: "ranked" });
 		mocked.confirmMatch.mockResolvedValue({
 			xpGained: 50,
 			level: 1,
@@ -347,6 +347,7 @@ describe("reportMatch", () => {
 		mocked.findReport.mockResolvedValueOnce(null).mockResolvedValueOnce({
 			opponent_id: 1,
 			winner_id: 1,
+			mode: "ranked",
 			cards_played_by_race: { Demon: 3 },
 			deck_races: ["Demon"],
 		});
