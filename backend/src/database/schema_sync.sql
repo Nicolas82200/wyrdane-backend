@@ -69,6 +69,7 @@ CREATE TABLE IF NOT EXISTS deck_cards (
 CREATE TABLE IF NOT EXISTS ranked_stats (
   user_id INT PRIMARY KEY,
   mmr INT NOT NULL DEFAULT 0,
+  hidden_mmr INT NOT NULL DEFAULT 0,
   wins INT NOT NULL DEFAULT 0,
   losses INT NOT NULL DEFAULT 0,
   win_streak INT NOT NULL DEFAULT 0,
@@ -81,6 +82,7 @@ CREATE TABLE IF NOT EXISTS matchmaking_tickets (
   ticket_id VARCHAR(36) NOT NULL,
   user_id INT NOT NULL,
   mmr INT NOT NULL,
+  mode VARCHAR(10) NOT NULL DEFAULT 'ranked',
   status VARCHAR(20) NOT NULL DEFAULT 'waiting',
   opponent_id INT NULL,
   role VARCHAR(10) NULL,
@@ -141,6 +143,7 @@ CREATE TABLE IF NOT EXISTS match_reports (
   reporter_id INT NOT NULL,
   opponent_id INT NOT NULL,
   winner_id INT NOT NULL,
+  mode VARCHAR(10) NOT NULL DEFAULT 'ranked',
   season INT NOT NULL,
   cards_played_by_race JSON NULL,
   deck_races JSON NULL,
