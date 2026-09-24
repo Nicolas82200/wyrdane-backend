@@ -3,6 +3,7 @@ import { Router } from "express";
 import {
 	reportMatch,
 	getMyStats,
+	getMatchHistoryHandler,
 	getLeaderboardHandler,
 	getMyLeaderboardPositionHandler,
 	getLeaderboardAroundMeHandler,
@@ -13,6 +14,7 @@ import rateLimit from "../middleware/rateLimit";
 const router = Router();
 
 router.get("/me", getMyStats);
+router.get("/matches/history", getMatchHistoryHandler);
 // Ordre important : routes littérales avant "/leaderboard" pour ne jamais
 // être capturées par un futur param dynamique - pas de conflit actuel mais
 // garde l'habitude.

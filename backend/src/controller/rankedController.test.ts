@@ -7,6 +7,7 @@ vi.mock("../model/rankedModel", () => ({
 	findReport: vi.fn(),
 	createReport: vi.fn(),
 	confirmMatch: vi.fn(),
+	getMatchHistory: vi.fn(),
 	getLeaderboard: vi.fn(),
 	getMyLeaderboardPosition: vi.fn(),
 	searchLeaderboard: vi.fn(),
@@ -35,6 +36,7 @@ import {
 	findReport,
 	createReport,
 	confirmMatch,
+	getMatchHistory,
 	getLeaderboard,
 	getMyLeaderboardPosition,
 	searchLeaderboard,
@@ -49,6 +51,7 @@ import { issueMatchSessionToken } from "../helper/matchSessionToken";
 import {
 	reportMatch,
 	getMyStats,
+	getMatchHistoryHandler,
 	getLeaderboardHandler,
 	getMyLeaderboardPositionHandler,
 	searchLeaderboardHandler,
@@ -60,6 +63,7 @@ const mocked = {
 	findReport: findReport as ReturnType<typeof vi.fn>,
 	createReport: createReport as ReturnType<typeof vi.fn>,
 	confirmMatch: confirmMatch as ReturnType<typeof vi.fn>,
+	getMatchHistory: getMatchHistory as ReturnType<typeof vi.fn>,
 	getLeaderboard: getLeaderboard as ReturnType<typeof vi.fn>,
 	getMyLeaderboardPosition: getMyLeaderboardPosition as ReturnType<typeof vi.fn>,
 	searchLeaderboard: searchLeaderboard as ReturnType<typeof vi.fn>,
@@ -253,7 +257,7 @@ describe("reportMatch", () => {
 
 		await reportMatch(req, res);
 
-		expect(mocked.createReport).toHaveBeenCalledWith("m1", 1, 2, 1, null, null, null);
+		expect(mocked.createReport).toHaveBeenCalledWith("m1", 1, 2, 1, null, null, null, "ranked");
 		expect(res.status).toHaveBeenCalledWith(202);
 		expect(mocked.confirmMatch).not.toHaveBeenCalled();
 	});
@@ -291,7 +295,7 @@ describe("reportMatch", () => {
 		mocked.findMatchHistory.mockResolvedValue(null);
 		mocked.findReport
 			.mockResolvedValueOnce(null)
-			.mockResolvedValueOnce({ opponent_id: 1, winner_id: 1 });
+			.mockResolvedValueOnce({ opponent_id: 1, winner_id: 1, mode: "ranked" });
 		mocked.confirmMatch.mockResolvedValue({
 			xpGained: 50,
 			level: 4,
@@ -306,18 +310,34 @@ describe("reportMatch", () => {
 
 		await reportMatch(req, res);
 
-		expect(mocked.confirmMatch).toHaveBeenCalledWith("m1", 1, 2, 1);
+		expect(mocked.confirmMatch).toHaveBeenCalledWith("m1", 1, 2, 1, "ranked", 0);
 		expect(res.status).toHaveBeenCalledWith(200);
 		expect(res.json).toHaveBeenCalledWith(
 			expect.objectContaining({ status: "confirmed", xpGained: 50, level: 4, xp: 5, xpToNext: 130, rewards: [] }),
 		);
 	});
 
+	it("forwards the sanitized durationSec to confirmMatch", async () => {
+		mocked.findMatchHistory.mockResolvedValue(null);
+		mocked.findReport
+			.mockResolvedValueOnce(null)
+			.mockResolvedValueOnce({ opponent_id: 1, winner_id: 1, mode: "ranked" });
+		mocked.confirmMatch.mockResolvedValue({
+			xpGained: 50, level: 4, xp: 5, xpToNext: 130, rewards: [], ratingA: 1016, ratingB: 984,
+		});
+		const req = reqAs(1, { clientMatchId: "m1", opponentId: 2, winnerId: 1, durationSec: 245 });
+		const res = mockRes();
+
+		await reportMatch(req, res);
+
+		expect(mocked.confirmMatch).toHaveBeenCalledWith("m1", 1, 2, 1, "ranked", 245);
+	});
+
 	it("progresses quests for both players once confirmed, with the correct win/loss flag each", async () => {
 		mocked.findMatchHistory.mockResolvedValue(null);
 		mocked.findReport
 			.mockResolvedValueOnce(null)
-			.mockResolvedValueOnce({ opponent_id: 1, winner_id: 1 });
+			.mockResolvedValueOnce({ opponent_id: 1, winner_id: 1, mode: "ranked" });
 		mocked.confirmMatch.mockResolvedValue({
 			xpGained: 50,
 			level: 1,
@@ -347,6 +367,7 @@ describe("reportMatch", () => {
 		mocked.findReport.mockResolvedValueOnce(null).mockResolvedValueOnce({
 			opponent_id: 1,
 			winner_id: 1,
+			mode: "ranked",
 			cards_played_by_race: { Demon: 3 },
 			deck_races: ["Demon"],
 		});
@@ -408,6 +429,39 @@ describe("getMyStats", () => {
 		const res = mockRes();
 		await getMyStats(req, res);
 		expect(res.status).toHaveBeenCalledWith(200);
+	});
+});
+
+describe("getMatchHistoryHandler", () => {
+	beforeEach(() => vi.resetAllMocks());
+
+	it("rejects unauthenticated requests", async () => {
+		const req = { user: undefined, query: {} } as unknown as Request;
+		const res = mockRes();
+		await getMatchHistoryHandler(req, res);
+		expect(res.status).toHaveBeenCalledWith(401);
+		expect(mocked.getMatchHistory).not.toHaveBeenCalled();
+	});
+
+	it("defaults to the caller's last 20 matches", async () => {
+		mocked.getMatchHistory.mockResolvedValue([]);
+		const req = { user: { id: 1 }, query: {} } as unknown as Request;
+		const res = mockRes();
+
+		await getMatchHistoryHandler(req, res);
+
+		expect(mocked.getMatchHistory).toHaveBeenCalledWith(1, 20);
+		expect(res.status).toHaveBeenCalledWith(200);
+	});
+
+	it("caps the requested page size at 50", async () => {
+		mocked.getMatchHistory.mockResolvedValue([]);
+		const req = { user: { id: 1 }, query: { limit: "9999" } } as unknown as Request;
+		const res = mockRes();
+
+		await getMatchHistoryHandler(req, res);
+
+		expect(mocked.getMatchHistory).toHaveBeenCalledWith(1, 50);
 	});
 });
 

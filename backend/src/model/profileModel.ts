@@ -11,7 +11,7 @@ interface ProfileData {
 	created_at: string;
 	collection_count: number;
 	solo: { wins: number; losses: number };
-	ranked: { mmr: number; wins: number; losses: number; rank: number };
+	ranked: { mmr: number; wins: number; losses: number; rank: number; totalPlayers: number };
 	level: { level: number; xp: number; xpToNext: number };
 }
 
@@ -34,6 +34,18 @@ const getRank = async (mmr: number): Promise<number> => {
 	return rows[0]?.rank ?? 1;
 };
 
+// Nombre total de joueurs classés cette saison (toute ligne ranked_stats,
+// y compris 0 partie jouée — voir getStats côté rankedModel, qui insère une
+// ligne dès la première consultation du profil) — dénominateur affiché à
+// côté du rang ("#12 / 348 joueurs", voir ProfilePanel.gd côté card-game).
+const getTotalRankedPlayers = async (): Promise<number> => {
+	const [rows] = await db.query<(RowDataPacket & { total: number })[]>(
+		"SELECT COUNT(*) AS total FROM ranked_stats WHERE season = ?",
+		[CURRENT_SEASON],
+	);
+	return rows[0]?.total ?? 0;
+};
+
 const getProfile = async (userId: number): Promise<ProfileData | null> => {
 	const [user] = await findOne(userId);
 	if (!user) return null;
@@ -45,7 +57,10 @@ const getProfile = async (userId: number): Promise<ProfileData | null> => {
 		getLevel(userId),
 	]);
 
-	const rank = await getRank(rankedStats.mmr);
+	const [rank, totalPlayers] = await Promise.all([
+		getRank(rankedStats.mmr),
+		getTotalRankedPlayers(),
+	]);
 
 	return {
 		id: user.id,
@@ -53,7 +68,7 @@ const getProfile = async (userId: number): Promise<ProfileData | null> => {
 		created_at: user.created_at,
 		collection_count: collectionCount,
 		solo: { wins: soloStats.wins, losses: soloStats.losses },
-		ranked: { mmr: rankedStats.mmr, wins: rankedStats.wins, losses: rankedStats.losses, rank },
+		ranked: { mmr: rankedStats.mmr, wins: rankedStats.wins, losses: rankedStats.losses, rank, totalPlayers },
 		level,
 	};
 };
