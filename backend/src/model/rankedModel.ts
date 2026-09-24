@@ -10,11 +10,14 @@ const DEFAULT_MMR = 0;
 interface RankedStatsRow extends RowDataPacket {
 	user_id: number;
 	mmr: number;
+	hidden_mmr: number;
 	wins: number;
 	losses: number;
 	win_streak: number;
 	season: number;
 }
+
+type MatchMode = "ranked" | "normal";
 
 interface MatchReportRow extends RowDataPacket {
 	id: number;
@@ -22,6 +25,7 @@ interface MatchReportRow extends RowDataPacket {
 	reporter_id: number;
 	opponent_id: number;
 	winner_id: number;
+	mode: MatchMode;
 	season: number;
 	cards_played_by_race: Record<string, number> | null;
 	deck_races: string[] | null;
@@ -63,7 +67,7 @@ const getStats = async (userId: number): Promise<RankedStatsRow> => {
 		[userId, DEFAULT_MMR, CURRENT_SEASON],
 	);
 	const [rows] = await db.query<RankedStatsRow[]>(
-		"SELECT user_id, mmr, wins, losses, win_streak, season FROM ranked_stats WHERE user_id = ?",
+		"SELECT user_id, mmr, hidden_mmr, wins, losses, win_streak, season FROM ranked_stats WHERE user_id = ?",
 		[userId],
 	);
 	return rows[0];
@@ -98,16 +102,18 @@ const createReport = async (
 	cardsPlayedByRace: Record<string, number> | null = null,
 	deckRaces: string[] | null = null,
 	cardsPlayed: string[] | null = null,
+	mode: MatchMode = "ranked",
 ): Promise<void> => {
 	await db.query(
 		`INSERT INTO match_reports
-		 (client_match_id, reporter_id, opponent_id, winner_id, season, cards_played_by_race, deck_races, cards_played)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		 (client_match_id, reporter_id, opponent_id, winner_id, mode, season, cards_played_by_race, deck_races, cards_played)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		[
 			clientMatchId,
 			reporterId,
 			opponentId,
 			winnerId,
+			mode,
 			CURRENT_SEASON,
 			cardsPlayedByRace ? JSON.stringify(cardsPlayedByRace) : null,
 			deckRaces ? JSON.stringify(deckRaces) : null,
@@ -175,11 +181,20 @@ const getCardStats = async (): Promise<{ totalRankedMatches: number; cards: Card
 // perdant (sa série retombe à 0). Renvoie l'XP gagné et le nouvel état de
 // niveau de player1Id (l'appelant côté contrôleur, voir
 // rankedController.reportMatch).
+// mode "ranked" : comportement historique inchangé — met à jour le MMR
+// public (mmr), wins/losses et win_streak. mode "normal" : ne touche JAMAIS
+// mmr/wins/losses (une partie Normal ne fait gagner ni perdre de points de
+// classement, voir README/CLAUDE.md « Ranked ») — seul hidden_mmr (MMR caché,
+// jamais affiché) évolue via la même formule Elo, pour permettre d'apparier
+// des Normal de niveau similaire (voir matchmakingModel.joinQueue). win_streak
+// reste partagé entre les deux modes (sert uniquement au multiplicateur d'XP,
+// hors sujet du MMR/classement).
 const confirmMatch = async (
 	clientMatchId: string,
 	player1Id: number,
 	player2Id: number,
 	winnerId: number,
+	mode: MatchMode = "ranked",
 	durationSec = 0,
 ): Promise<{
 	xpGained: number;
@@ -204,16 +219,17 @@ const confirmMatch = async (
 		);
 
 		const [statsRows] = await connection.query<RankedStatsRow[]>(
-			"SELECT user_id, mmr, win_streak FROM ranked_stats WHERE user_id IN (?, ?) FOR UPDATE",
+			"SELECT user_id, mmr, hidden_mmr, win_streak FROM ranked_stats WHERE user_id IN (?, ?) FOR UPDATE",
 			[player1Id, player2Id],
 		);
 		const stats = new Map(statsRows.map((row) => [row.user_id, row]));
+		const ratingField = mode === "normal" ? "hidden_mmr" : "mmr";
 
-		const mmrBefore1 = stats.get(player1Id)?.mmr ?? DEFAULT_MMR;
-		const mmrBefore2 = stats.get(player2Id)?.mmr ?? DEFAULT_MMR;
+		const ratingBefore1 = stats.get(player1Id)?.[ratingField] ?? DEFAULT_MMR;
+		const ratingBefore2 = stats.get(player2Id)?.[ratingField] ?? DEFAULT_MMR;
 		const { newRatingA, newRatingB } = calculateElo(
-			mmrBefore1,
-			mmrBefore2,
+			ratingBefore1,
+			ratingBefore2,
 			winnerId === player1Id ? 1 : 0,
 		);
 
@@ -224,14 +240,25 @@ const confirmMatch = async (
 		const xpGained1 = player1Won ? winXpForStreak(newStreak1) : XP_LOSS_NETWORK;
 		const xpGained2 = player2Won ? winXpForStreak(newStreak2) : XP_LOSS_NETWORK;
 
-		await connection.query(
-			"UPDATE ranked_stats SET mmr = ?, wins = wins + ?, losses = losses + ?, win_streak = ? WHERE user_id = ?",
-			[newRatingA, player1Won ? 1 : 0, player1Won ? 0 : 1, newStreak1, player1Id],
-		);
-		await connection.query(
-			"UPDATE ranked_stats SET mmr = ?, wins = wins + ?, losses = losses + ?, win_streak = ? WHERE user_id = ?",
-			[newRatingB, player2Won ? 1 : 0, player2Won ? 0 : 1, newStreak2, player2Id],
-		);
+		if (mode === "normal") {
+			await connection.query(
+				"UPDATE ranked_stats SET hidden_mmr = ?, win_streak = ? WHERE user_id = ?",
+				[newRatingA, newStreak1, player1Id],
+			);
+			await connection.query(
+				"UPDATE ranked_stats SET hidden_mmr = ?, win_streak = ? WHERE user_id = ?",
+				[newRatingB, newStreak2, player2Id],
+			);
+		} else {
+			await connection.query(
+				"UPDATE ranked_stats SET mmr = ?, wins = wins + ?, losses = losses + ?, win_streak = ? WHERE user_id = ?",
+				[newRatingA, player1Won ? 1 : 0, player1Won ? 0 : 1, newStreak1, player1Id],
+			);
+			await connection.query(
+				"UPDATE ranked_stats SET mmr = ?, wins = wins + ?, losses = losses + ?, win_streak = ? WHERE user_id = ?",
+				[newRatingB, player2Won ? 1 : 0, player2Won ? 0 : 1, newStreak2, player2Id],
+			);
+		}
 
 		// xp_awarded_player1/2 journalisent l'XP brute accordée à ce match (pas
 		// l'état de niveau, qui évolue au fil des matchs suivants) : sert à
@@ -239,6 +266,13 @@ const confirmMatch = async (
 		// rejoué après confirmation, client_match_id étant UNIQUE sur cette
 		// table — confirmMatch ne peut s'exécuter (et donc créditer l'XP)
 		// qu'une seule fois par match, un retry réseau ne peut pas la dupliquer.
+		// mmr_change_player1/2 ne journalise jamais la variation du MMR CACHÉ
+		// (mode "normal") : hidden_mmr n'est jamais exposé au client (voir son
+		// commentaire sur ranked_stats plus haut), donc son delta ne doit pas
+		// fuiter via l'historique de parties du profil (GET /api/ranked/matches/
+		// history côté card-game) — seul un match "ranked" journalise un vrai delta.
+		const mmrChange1 = mode === "ranked" ? newRatingA - ratingBefore1 : 0;
+		const mmrChange2 = mode === "ranked" ? newRatingB - ratingBefore2 : 0;
 		await connection.query(
 			`INSERT INTO match_history
 			 (client_match_id, player1_id, player2_id, winner_id, season, xp_awarded_player1, xp_awarded_player2,
@@ -246,7 +280,7 @@ const confirmMatch = async (
 			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			[
 				clientMatchId, player1Id, player2Id, winnerId, CURRENT_SEASON, xpGained1, xpGained2,
-				newRatingA - mmrBefore1, newRatingB - mmrBefore2, durationSec,
+				mmrChange1, mmrChange2, durationSec,
 			],
 		);
 
@@ -410,3 +444,4 @@ export {
 	recordCardPlays,
 	getCardStats,
 };
+export type { MatchMode };

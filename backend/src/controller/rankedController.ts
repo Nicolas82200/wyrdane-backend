@@ -13,6 +13,7 @@ import {
 	searchLeaderboard,
 	recordCardPlays,
 } from "../model/rankedModel";
+import type { MatchMode } from "../model/rankedModel";
 import { sanitizeCardsPlayedByRace, sanitizeDeckRaces, sanitizeCardsPlayed, sanitizeDurationSec } from "../helper/matchPayload";
 import { verifyMatchSessionToken } from "../helper/matchSessionToken";
 import { progressForMatch } from "../model/questModel";
@@ -38,9 +39,14 @@ const reportMatch = async (req: Request, res: Response): Promise<void> => {
 			deckRaces?: string[];
 			cardsPlayed?: string[];
 			matchSessionToken?: string;
+			mode?: string;
 			durationSec?: number;
 		};
 		const { clientMatchId, opponentId, winnerId, matchSessionToken } = rawBody;
+		// "ranked" par défaut : tolère un client pas encore mis à jour (avant le
+		// MMR caché Normal) qui n'enverrait pas ce champ — un match rapporté sans
+		// mode reste traité comme classé, comportement historique inchangé.
+		const mode: MatchMode = rawBody.mode === "normal" ? "normal" : "ranked";
 		const durationSec = sanitizeDurationSec(rawBody.durationSec);
 
 		if (
@@ -109,7 +115,7 @@ const reportMatch = async (req: Request, res: Response): Promise<void> => {
 			return;
 		}
 
-		await createReport(clientMatchId, userId, opponentId, winnerId, cardsPlayedByRace ?? null, deckRaces ?? null, cardsPlayed ?? null);
+		await createReport(clientMatchId, userId, opponentId, winnerId, cardsPlayedByRace ?? null, deckRaces ?? null, cardsPlayed ?? null, mode);
 
 		const opponentReport = await findReport(clientMatchId, opponentId);
 		if (!opponentReport) {
@@ -119,7 +125,8 @@ const reportMatch = async (req: Request, res: Response): Promise<void> => {
 
 		if (
 			opponentReport.opponent_id !== userId ||
-			opponentReport.winner_id !== winnerId
+			opponentReport.winner_id !== winnerId ||
+			opponentReport.mode !== mode
 		) {
 			res.status(409).json({ status: "conflict", message: "Les rapports des deux joueurs ne concordent pas" });
 			return;
@@ -130,6 +137,7 @@ const reportMatch = async (req: Request, res: Response): Promise<void> => {
 			userId,
 			opponentId,
 			winnerId,
+			mode,
 			durationSec,
 		);
 		// Une fois par joueur, jamais deux fois (confirmMatch ne s'exécute qu'une
@@ -160,8 +168,13 @@ const reportMatch = async (req: Request, res: Response): Promise<void> => {
 		});
 		// ratingA/ratingB = MMR post-match de userId/opponentId respectivement
 		// (confirmMatch(clientMatchId, userId, opponentId, ...) → player1=userId).
-		await progressForRankTier(userId, ratingA);
-		await progressForRankTier(opponentId, ratingB);
+		// Uniquement en classé : en mode "normal" ratingA/ratingB sont le MMR
+		// CACHÉ (jamais affiché), qui ne doit jamais faire progresser un succès
+		// de palier de classement public.
+		if (mode === "ranked") {
+			await progressForRankTier(userId, ratingA);
+			await progressForRankTier(opponentId, ratingB);
+		}
 		res.status(200).json({ status: "confirmed", xpGained, level, xp, xpToNext, rewards });
 	} catch (error) {
 		console.error(error);
@@ -177,7 +190,9 @@ const getMyStats = async (req: Request, res: Response): Promise<void> => {
 			return;
 		}
 
-		const stats = await getStats(userId);
+		// hidden_mmr n'est jamais exposé, même au joueur concerné (comportement
+		// voulu façon MMR caché League of Legends — voir rankedModel.getStats).
+		const { hidden_mmr, ...stats } = await getStats(userId);
 		res.status(200).json(stats);
 	} catch (error) {
 		console.error(error);

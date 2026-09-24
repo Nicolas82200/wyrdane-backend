@@ -136,9 +136,16 @@ CREATE TABLE deck_cards (
 -- remise à 0 par n'importe quelle défaite (voir rankedModel.confirmMatch) —
 -- pur stat d'affichage côté client depuis le retrait du barème d'or par
 -- match (voir levelModel.ts), distinct de `wins` qui ne fait qu'accumuler.
+-- hidden_mmr : MMR caché (même formule Elo que `mmr`, jamais affiché ni
+-- exposé au leaderboard) utilisé uniquement pour apparier les parties
+-- "Normal" par niveau, façon MMR caché League of Legends — voir
+-- matchmakingModel.ts/rankedModel.confirmMatch. Totalement indépendant de
+-- `mmr`/wins/losses/win_streak : une partie Normal ne fait jamais gagner ou
+-- perdre de points de classement, seul le Classé touche à ces colonnes.
 CREATE TABLE ranked_stats (
   user_id INT PRIMARY KEY,
   mmr INT NOT NULL DEFAULT 0,
+  hidden_mmr INT NOT NULL DEFAULT 0,
   wins INT NOT NULL DEFAULT 0,
   losses INT NOT NULL DEFAULT 0,
   win_streak INT NOT NULL DEFAULT 0,
@@ -156,11 +163,16 @@ CREATE TABLE ranked_stats (
 -- opponent_id ne sont renseignés qu'une fois status = matched. steam_lobby_id
 -- en BIGINT (SteamID de lobby 64 bits), NULL tant que l'hôte n'a pas encore
 -- appelé report-lobby — voir matchmakingModel.ts.
+-- mode : 'ranked' (apparié sur ranked_stats.mmr, le MMR public affiché) ou
+-- 'normal' (apparié sur ranked_stats.hidden_mmr, jamais affiché) — deux
+-- joueurs ne sont jamais appariés entre modes différents, voir
+-- matchmakingModel.findOpponent.
 CREATE TABLE matchmaking_tickets (
   id INT AUTO_INCREMENT PRIMARY KEY,
   ticket_id VARCHAR(36) NOT NULL,
   user_id INT NOT NULL,
   mmr INT NOT NULL,
+  mode VARCHAR(10) NOT NULL DEFAULT 'ranked',
   status VARCHAR(20) NOT NULL DEFAULT 'waiting',
   opponent_id INT NULL,
   role VARCHAR(10) NULL,
@@ -266,6 +278,11 @@ CREATE TABLE match_reports (
   reporter_id INT NOT NULL,
   opponent_id INT NOT NULL,
   winner_id INT NOT NULL,
+  -- 'ranked' | 'normal' — déclaré par chaque reporter (voir Battle.is_ranked_match
+  -- côté card-game), vérifié concordant entre les deux rapports avant
+  -- confirmMatch (comme winner_id) : décide si le MMR PUBLIC (classé) ou le
+  -- MMR caché (Normal) est mis à jour, voir rankedModel.confirmMatch.
+  mode VARCHAR(10) NOT NULL DEFAULT 'ranked',
   season INT NOT NULL,
   cards_played_by_race JSON NULL,
   deck_races JSON NULL,

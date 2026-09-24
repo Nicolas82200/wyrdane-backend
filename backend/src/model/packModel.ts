@@ -8,7 +8,7 @@ import { progressForPackOpen } from "./uniqueQuestModel";
 import type { Cards } from "../types";
 
 const PACK_COST = 500;
-const CARDS_PER_PACK = 4;
+const CARDS_PER_PACK = 5;
 // Achat en une seule requête (voir buyPacks) : plafond raisonnable, aligné sur
 // le rate-limit de la route /buy plutôt que sur une vraie limite métier.
 const MAX_BUY_QUANTITY = 50;
@@ -16,10 +16,10 @@ const MAX_BUY_QUANTITY = 50;
 // Pondération de tirage par rareté (somme non contrainte à 100, seul le
 // ratio compte). Ajuster ici seul suffit à retoucher l'économie des packs.
 const RARITY_WEIGHTS: Record<string, number> = {
-	Commune: 60,
+	Commune: 58,
 	Rare: 25,
 	Épique: 12,
-	Légendaire: 3,
+	Légendaire: 5,
 };
 
 interface DrawableCardRow extends Cards, RowDataPacket {}
