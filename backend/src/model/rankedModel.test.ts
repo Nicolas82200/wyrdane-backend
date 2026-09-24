@@ -102,7 +102,7 @@ describe("confirmMatch", () => {
 		]);
 		mockedDb.getConnection.mockResolvedValueOnce(connection);
 
-		await confirmMatch("m3", 1, 2, 1, 245);
+		await confirmMatch("m3", 1, 2, 1, "ranked", 245);
 
 		const params = findMatchHistoryInsert(connection);
 		// Elo à MMR égal (1000/1000), K=32 : gagnant +16, perdant -16.
@@ -120,6 +120,22 @@ describe("confirmMatch", () => {
 
 		const params = findMatchHistoryInsert(connection);
 		expect(params?.[9]).toBe(0);
+	});
+
+	it("never journals the hidden MMR delta of a Normal match on match_history (hidden_mmr must never leak to the client)", async () => {
+		const connection = makeConnection([
+			{ user_id: 1, mmr: 1000, hidden_mmr: 1200, win_streak: 0 },
+			{ user_id: 2, mmr: 1000, hidden_mmr: 1200, win_streak: 0 },
+		]);
+		mockedDb.getConnection.mockResolvedValueOnce(connection);
+
+		await confirmMatch("m3c", 1, 2, 1, "normal", 100);
+
+		const params = findMatchHistoryInsert(connection);
+		// mmr_change_player1/2 (index 7/8) restent à 0 même si hidden_mmr a bougé
+		// en interne (voir l'UPDATE ranked_stats SET hidden_mmr = ... plus bas).
+		expect(params?.[7]).toBe(0);
+		expect(params?.[8]).toBe(0);
 	});
 
 	it("surfaces the level/xp/rewards returned by applyXp for player1Id", async () => {
