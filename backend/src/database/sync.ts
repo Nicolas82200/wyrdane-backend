@@ -68,6 +68,7 @@ const ensureSoloStatsColumns = async (connection: mysql.Connection): Promise<voi
 // schema.sql) — même pattern que ensureSoloStatsColumns.
 const RANKED_STATS_COLUMNS_TO_ENSURE: { name: string; ddl: string }[] = [
 	{ name: "win_streak", ddl: "win_streak INT NOT NULL DEFAULT 0" },
+	{ name: "hidden_mmr", ddl: "hidden_mmr INT NOT NULL DEFAULT 0" },
 ];
 
 const ensureRankedStatsColumns = async (connection: mysql.Connection): Promise<void> => {
@@ -122,6 +123,7 @@ const MATCH_REPORTS_COLUMNS_TO_ENSURE: { name: string; ddl: string }[] = [
 	{ name: "cards_played_by_race", ddl: "cards_played_by_race JSON NULL" },
 	{ name: "deck_races", ddl: "deck_races JSON NULL" },
 	{ name: "cards_played", ddl: "cards_played JSON NULL" },
+	{ name: "mode", ddl: "mode VARCHAR(10) NOT NULL DEFAULT 'ranked'" },
 ];
 
 const ensureMatchReportsColumns = async (connection: mysql.Connection): Promise<void> => {
@@ -166,6 +168,10 @@ const ensureMatchHistoryColumns = async (connection: mysql.Connection): Promise<
 const MATCHMAKING_TICKETS_COLUMNS_TO_ENSURE: { name: string; ddl: string }[] = [
 	{ name: "match_id", ddl: "match_id VARCHAR(36) NULL" },
 	{ name: "match_session_token", ddl: "match_session_token TEXT NULL" },
+	// 'ranked' | 'normal' — voir matchmakingModel.ts/schema.sql. Défaut 'ranked'
+	// pour que les tickets déjà en base (toujours du classé jusqu'ici) restent
+	// cohérents sans backfill.
+	{ name: "mode", ddl: "mode VARCHAR(10) NOT NULL DEFAULT 'ranked'" },
 ];
 
 const ensureMatchmakingTicketsColumns = async (connection: mysql.Connection): Promise<void> => {
