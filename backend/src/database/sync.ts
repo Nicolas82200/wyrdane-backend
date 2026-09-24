@@ -28,6 +28,8 @@ const USERS_COLUMNS_TO_ENSURE: { name: string; ddl: string }[] = [
 	{ name: "free_packs", ddl: "free_packs INT NOT NULL DEFAULT 0" },
 	{ name: "level", ddl: "level INT NOT NULL DEFAULT 1" },
 	{ name: "xp", ddl: "xp INT NOT NULL DEFAULT 0" },
+	{ name: "last_heartbeat_at", ddl: "last_heartbeat_at TIMESTAMP NULL DEFAULT NULL" },
+	{ name: "in_game", ddl: "in_game BOOLEAN NOT NULL DEFAULT FALSE" },
 ];
 
 const ensureUsersColumns = async (connection: mysql.Connection): Promise<void> => {

@@ -67,7 +67,16 @@ CREATE TABLE users (
   -- chaque niveau franchi (carte tous les 5, pack tous les 25, or sinon) —
   -- voir levelModel.rewardKindForLevel.
   level INT NOT NULL DEFAULT 1,
-  xp INT NOT NULL DEFAULT 0
+  xp INT NOT NULL DEFAULT 0,
+  -- Présence (voir presenceModel.ts, POST /api/presence/heartbeat) : le
+  -- client envoie un heartbeat périodique tant que le jeu tourne. En ligne =
+  -- last_heartbeat_at récent (fenêtre glissante, voir ONLINE_WINDOW_SECONDS
+  -- côté modèle, pas de colonne "online" séparée qui pourrait désync si le
+  -- process du joueur meurt sans prévenir). in_game reflète juste si le
+  -- dernier heartbeat a été envoyé depuis une bataille, jamais affiché sans
+  -- last_heartbeat_at récent.
+  last_heartbeat_at TIMESTAMP NULL DEFAULT NULL,
+  in_game BOOLEAN NOT NULL DEFAULT FALSE
 );
 
 -- Une ligne par identité liée (Steam aujourd'hui, potentiellement email/Google/Apple
@@ -505,5 +514,50 @@ CREATE TABLE wishlist_stats (
   id INT PRIMARY KEY DEFAULT 1,
   count INT NOT NULL DEFAULT 0,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+-- Système d'amis Wyrdane (distinct de la liste d'amis Steam, voir CLAUDE.md
+-- « Système d'amis Wyrdane + chat ») : une ligne par relation, dans un seul
+-- sens (requester -> addressee) avec un statut qui évolue plutôt que deux
+-- lignes symétriques. status='pending' tant que l'addressee n'a pas répondu ;
+-- 'accepted' une fois la demande acceptée (relation alors bidirectionnelle en
+-- lecture, voir friendModel.getFriends qui matche sur les deux colonnes).
+-- Une demande refusée est supprimée (pas de status='declined' persistant) :
+-- rien n'empêche de redemander plus tard, pas de compteur à faire vieillir.
+-- UNIQUE sur (requester_id, addressee_id) : un même joueur ne peut avoir
+-- qu'une seule relation en cours (pending ou accepted) vers un autre,
+-- vérifié en app (findFriendship dans les deux sens) avant tout INSERT pour
+-- éviter la paire inverse redondante (voir sendFriendRequest, qui auto-accepte
+-- si une demande inverse pending existe déjà, comme un "vous êtes déjà amis").
+CREATE TABLE friendships (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  requester_id INT NOT NULL,
+  addressee_id INT NOT NULL,
+  status VARCHAR(10) NOT NULL DEFAULT 'pending',
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  responded_at TIMESTAMP NULL DEFAULT NULL,
+  FOREIGN KEY (requester_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (addressee_id) REFERENCES users(id) ON DELETE CASCADE,
+  UNIQUE KEY unique_friend_pair (requester_id, addressee_id),
+  INDEX idx_friendships_addressee_status (addressee_id, status),
+  INDEX idx_friendships_requester_status (requester_id, status)
+);
+
+-- Messagerie privée entre amis (voir CLAUDE.md « Système d'amis Wyrdane +
+-- chat ») : une ligne par message envoyé, jamais éditée après coup (read_at
+-- est la seule colonne mise à jour, quand le destinataire ouvre la
+-- conversation). Historique conservé indéfiniment (décision utilisateur, pas
+-- de purge automatique) — voir messageModel.ts.
+CREATE TABLE messages (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  sender_id INT NOT NULL,
+  recipient_id INT NOT NULL,
+  body VARCHAR(500) NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  read_at TIMESTAMP NULL DEFAULT NULL,
+  FOREIGN KEY (sender_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (recipient_id) REFERENCES users(id) ON DELETE CASCADE,
+  INDEX idx_messages_conversation (sender_id, recipient_id, created_at),
+  INDEX idx_messages_recipient_unread (recipient_id, read_at)
 );
 INSERT INTO wishlist_stats (id, count) VALUES (1, 0);
