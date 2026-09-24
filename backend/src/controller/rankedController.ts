@@ -6,6 +6,7 @@ import {
 	findReport,
 	createReport,
 	confirmMatch,
+	getMatchHistory,
 	getLeaderboard,
 	getMyLeaderboardPosition,
 	getLeaderboardAroundUser,
@@ -13,7 +14,7 @@ import {
 	recordCardPlays,
 } from "../model/rankedModel";
 import type { MatchMode } from "../model/rankedModel";
-import { sanitizeCardsPlayedByRace, sanitizeDeckRaces, sanitizeCardsPlayed } from "../helper/matchPayload";
+import { sanitizeCardsPlayedByRace, sanitizeDeckRaces, sanitizeCardsPlayed, sanitizeDurationSec } from "../helper/matchPayload";
 import { verifyMatchSessionToken } from "../helper/matchSessionToken";
 import { progressForMatch } from "../model/questModel";
 import { progressForMatch as progressWeeklyForMatch } from "../model/weeklyQuestModel";
@@ -39,12 +40,14 @@ const reportMatch = async (req: Request, res: Response): Promise<void> => {
 			cardsPlayed?: string[];
 			matchSessionToken?: string;
 			mode?: string;
+			durationSec?: number;
 		};
 		const { clientMatchId, opponentId, winnerId, matchSessionToken } = rawBody;
 		// "ranked" par défaut : tolère un client pas encore mis à jour (avant le
 		// MMR caché Normal) qui n'enverrait pas ce champ — un match rapporté sans
 		// mode reste traité comme classé, comportement historique inchangé.
 		const mode: MatchMode = rawBody.mode === "normal" ? "normal" : "ranked";
+		const durationSec = sanitizeDurationSec(rawBody.durationSec);
 
 		if (
 			!clientMatchId ||
@@ -135,6 +138,7 @@ const reportMatch = async (req: Request, res: Response): Promise<void> => {
 			opponentId,
 			winnerId,
 			mode,
+			durationSec,
 		);
 		// Une fois par joueur, jamais deux fois (confirmMatch ne s'exécute qu'une
 		// seule fois par match — voir le court-circuit findMatchHistory plus haut).
@@ -190,6 +194,25 @@ const getMyStats = async (req: Request, res: Response): Promise<void> => {
 		// voulu façon MMR caché League of Legends — voir rankedModel.getStats).
 		const { hidden_mmr, ...stats } = await getStats(userId);
 		res.status(200).json(stats);
+	} catch (error) {
+		console.error(error);
+		res.status(500).json({ message: "Server error" });
+	}
+};
+
+// Historique des 20 (par défaut) dernières parties réseau du joueur —
+// consommé par MatchHistoryPanel.gd côté card-game (onglet "Historique" du
+// profil). Solo/IA non couverts (pas de second rapporteur, voir match_history).
+const getMatchHistoryHandler = async (req: Request, res: Response): Promise<void> => {
+	try {
+		const userId = getUserId(req);
+		if (!userId) {
+			res.status(401).json({ message: "Non authentifié" });
+			return;
+		}
+		const limit = Math.min(Number(req.query.limit) || 20, 50);
+		const history = await getMatchHistory(userId, limit);
+		res.status(200).json(history);
 	} catch (error) {
 		console.error(error);
 		res.status(500).json({ message: "Server error" });
@@ -273,6 +296,7 @@ const searchLeaderboardHandler = async (req: Request, res: Response): Promise<vo
 export {
 	reportMatch,
 	getMyStats,
+	getMatchHistoryHandler,
 	getLeaderboardHandler,
 	getMyLeaderboardPositionHandler,
 	getLeaderboardAroundMeHandler,

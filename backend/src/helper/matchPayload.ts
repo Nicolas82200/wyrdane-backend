@@ -53,4 +53,15 @@ const sanitizeCardsPlayed = (value: string[] | undefined): string[] | undefined 
 	return sanitized.length > 0 ? sanitized : undefined;
 };
 
-export { IMPLEMENTED_RACES, sanitizeCardsPlayedByRace, sanitizeDeckRaces, sanitizeCardsPlayed };
+// Durée déclarée par le client pour ce match (secondes) — alimente
+// l'historique de parties du profil (match_history.duration_sec). Bornée à
+// 3h : un match Wyrdane normal dure quelques minutes, une valeur au-delà est
+// forcément un payload aberrant (jamais rejetée pour autant, juste ignorée).
+const MAX_DURATION_SEC = 3 * 60 * 60;
+
+const sanitizeDurationSec = (value: number | undefined): number => {
+	if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return 0;
+	return Math.min(Math.floor(value), MAX_DURATION_SEC);
+};
+
+export { IMPLEMENTED_RACES, sanitizeCardsPlayedByRace, sanitizeDeckRaces, sanitizeCardsPlayed, sanitizeDurationSec };
