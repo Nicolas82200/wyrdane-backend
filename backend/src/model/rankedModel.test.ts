@@ -21,7 +21,7 @@ vi.mock("./levelModel", () => ({
 
 import db from "./db";
 import { applyXp, winXpForStreak } from "./levelModel";
-import { confirmMatch } from "./rankedModel";
+import { confirmMatch, getMatchHistory } from "./rankedModel";
 
 const mockedDb = db as unknown as { query: ReturnType<typeof vi.fn>; getConnection: ReturnType<typeof vi.fn> };
 const mockedApplyXp = applyXp as ReturnType<typeof vi.fn>;
@@ -95,17 +95,31 @@ describe("confirmMatch", () => {
 		expect(mockedApplyXp).toHaveBeenCalledWith(2, 50, connection);
 	});
 
-	it("journals the raw XP awarded to each player on match_history", async () => {
+	it("journals the raw XP awarded, the MMR change of each player and the duration on match_history", async () => {
 		const connection = makeConnection([
 			{ user_id: 1, mmr: 1000, win_streak: 0 },
 			{ user_id: 2, mmr: 1000, win_streak: 0 },
 		]);
 		mockedDb.getConnection.mockResolvedValueOnce(connection);
 
-		await confirmMatch("m3", 1, 2, 1);
+		await confirmMatch("m3", 1, 2, 1, 245);
 
 		const params = findMatchHistoryInsert(connection);
-		expect(params).toEqual(["m3", 1, 2, 1, 1, 50, 15]);
+		// Elo à MMR égal (1000/1000), K=32 : gagnant +16, perdant -16.
+		expect(params).toEqual(["m3", 1, 2, 1, 1, 50, 15, 16, -16, 245]);
+	});
+
+	it("defaults duration_sec to 0 when the caller does not pass one", async () => {
+		const connection = makeConnection([
+			{ user_id: 1, mmr: 1000, win_streak: 0 },
+			{ user_id: 2, mmr: 1000, win_streak: 0 },
+		]);
+		mockedDb.getConnection.mockResolvedValueOnce(connection);
+
+		await confirmMatch("m3b", 1, 2, 1);
+
+		const params = findMatchHistoryInsert(connection);
+		expect(params?.[9]).toBe(0);
 	});
 
 	it("surfaces the level/xp/rewards returned by applyXp for player1Id", async () => {
@@ -180,5 +194,40 @@ describe("confirmMatch", () => {
 		expect(connection.rollback).toHaveBeenCalledTimes(1);
 		expect(connection.commit).not.toHaveBeenCalled();
 		expect(connection.release).toHaveBeenCalledTimes(1);
+	});
+});
+
+describe("getMatchHistory", () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+	});
+
+	it("queries with the caller's id repeated for each IF() branch plus the limit", async () => {
+		mockedDb.query.mockResolvedValueOnce([[]]);
+
+		await getMatchHistory(42, 20);
+
+		const [sql, params] = mockedDb.query.mock.calls[0];
+		expect(sql).toContain("FROM match_history");
+		expect(params).toEqual([42, 42, 42, 42, 42, 20]);
+	});
+
+	it("returns the rows as-is (opponent identity/deck and per-caller MMR change already resolved in SQL)", async () => {
+		const rows = [
+			{
+				client_match_id: "m1",
+				played_at: "2026-09-20 10:00:00",
+				duration_sec: 300,
+				winner_id: 42,
+				mmr_change: 16,
+				opponent_username: "Rival",
+				opponent_deck_races: ["Undead"],
+			},
+		];
+		mockedDb.query.mockResolvedValueOnce([rows]);
+
+		const result = await getMatchHistory(42, 20);
+
+		expect(result).toEqual(rows);
 	});
 });

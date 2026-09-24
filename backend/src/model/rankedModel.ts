@@ -47,6 +47,16 @@ interface MatchHistoryRow extends RowDataPacket {
 	xp_awarded_player2: number;
 }
 
+interface PlayerMatchHistoryRow extends RowDataPacket {
+	client_match_id: string;
+	played_at: string;
+	duration_sec: number;
+	winner_id: number;
+	mmr_change: number;
+	opponent_username: string;
+	opponent_deck_races: string[] | null;
+}
+
 const getStats = async (userId: number): Promise<RankedStatsRow> => {
 	await db.query(
 		"INSERT INTO ranked_stats (user_id, mmr, season) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE user_id = user_id",
@@ -170,6 +180,7 @@ const confirmMatch = async (
 	player1Id: number,
 	player2Id: number,
 	winnerId: number,
+	durationSec = 0,
 ): Promise<{
 	xpGained: number;
 	level: number;
@@ -198,9 +209,11 @@ const confirmMatch = async (
 		);
 		const stats = new Map(statsRows.map((row) => [row.user_id, row]));
 
+		const mmrBefore1 = stats.get(player1Id)?.mmr ?? DEFAULT_MMR;
+		const mmrBefore2 = stats.get(player2Id)?.mmr ?? DEFAULT_MMR;
 		const { newRatingA, newRatingB } = calculateElo(
-			stats.get(player1Id)?.mmr ?? DEFAULT_MMR,
-			stats.get(player2Id)?.mmr ?? DEFAULT_MMR,
+			mmrBefore1,
+			mmrBefore2,
 			winnerId === player1Id ? 1 : 0,
 		);
 
@@ -228,9 +241,13 @@ const confirmMatch = async (
 		// qu'une seule fois par match, un retry réseau ne peut pas la dupliquer.
 		await connection.query(
 			`INSERT INTO match_history
-			 (client_match_id, player1_id, player2_id, winner_id, season, xp_awarded_player1, xp_awarded_player2)
-			 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-			[clientMatchId, player1Id, player2Id, winnerId, CURRENT_SEASON, xpGained1, xpGained2],
+			 (client_match_id, player1_id, player2_id, winner_id, season, xp_awarded_player1, xp_awarded_player2,
+			  mmr_change_player1, mmr_change_player2, duration_sec)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			[
+				clientMatchId, player1Id, player2Id, winnerId, CURRENT_SEASON, xpGained1, xpGained2,
+				newRatingA - mmrBefore1, newRatingB - mmrBefore2, durationSec,
+			],
 		);
 
 		const xp1 = await applyXp(player1Id, xpGained1, connection);
@@ -257,6 +274,37 @@ const confirmMatch = async (
 	} finally {
 		connection.release();
 	}
+};
+
+// Les 20 (ou moins) dernières parties classées/rapides du joueur, adversaire
+// le plus récent en tête — voir MatchHistoryPanel.gd côté card-game. Le deck
+// adverse (opponent_deck_races) vient du RAPPORT de l'adversaire lui-même
+// (match_reports.reporter_id = son id) : peut être absent (LEFT JOIN) pour un
+// match confirmé avant l'ajout de deckRaces au payload, jamais bloquant.
+// mmr_change est calculé côté SQL selon que l'appelant est player1 ou player2
+// sur chaque ligne — jamais renvoyé à plat pour éviter d'exposer le MMR brut
+// de l'adversaire (non pertinent ici, seul le delta du joueur importe).
+const getMatchHistory = async (userId: number, limit: number): Promise<PlayerMatchHistoryRow[]> => {
+	const [rows] = await db.query<PlayerMatchHistoryRow[]>(
+		`SELECT
+		   mh.client_match_id,
+		   mh.played_at,
+		   mh.duration_sec,
+		   mh.winner_id,
+		   IF(mh.player1_id = ?, mh.mmr_change_player1, mh.mmr_change_player2) AS mmr_change,
+		   ou.username AS opponent_username,
+		   mr.deck_races AS opponent_deck_races
+		 FROM match_history mh
+		 JOIN users ou ON ou.id = IF(mh.player1_id = ?, mh.player2_id, mh.player1_id)
+		 LEFT JOIN match_reports mr
+		   ON mr.client_match_id = mh.client_match_id
+		  AND mr.reporter_id = IF(mh.player1_id = ?, mh.player2_id, mh.player1_id)
+		 WHERE mh.player1_id = ? OR mh.player2_id = ?
+		 ORDER BY mh.played_at DESC
+		 LIMIT ?`,
+		[userId, userId, userId, userId, userId, limit],
+	);
+	return rows;
 };
 
 type LeaderboardRow = RankedStatsRow & { username: string; steam_id: string | null; rank: number };
@@ -354,6 +402,7 @@ export {
 	findReport,
 	createReport,
 	confirmMatch,
+	getMatchHistory,
 	getLeaderboard,
 	getMyLeaderboardPosition,
 	getLeaderboardAroundUser,

@@ -144,6 +144,9 @@ const ensureMatchReportsColumns = async (connection: mysql.Connection): Promise<
 const MATCH_HISTORY_COLUMNS_TO_ENSURE: { name: string; ddl: string }[] = [
 	{ name: "xp_awarded_player1", ddl: "xp_awarded_player1 INT NOT NULL DEFAULT 0" },
 	{ name: "xp_awarded_player2", ddl: "xp_awarded_player2 INT NOT NULL DEFAULT 0" },
+	{ name: "mmr_change_player1", ddl: "mmr_change_player1 INT NOT NULL DEFAULT 0" },
+	{ name: "mmr_change_player2", ddl: "mmr_change_player2 INT NOT NULL DEFAULT 0" },
+	{ name: "duration_sec", ddl: "duration_sec INT NOT NULL DEFAULT 0" },
 ];
 
 const ensureMatchHistoryColumns = async (connection: mysql.Connection): Promise<void> => {

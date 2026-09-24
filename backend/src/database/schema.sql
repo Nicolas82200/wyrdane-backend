@@ -240,6 +240,13 @@ CREATE TABLE match_history (
   -- le recalculer, client_match_id étant UNIQUE.
   xp_awarded_player1 INT NOT NULL DEFAULT 0,
   xp_awarded_player2 INT NOT NULL DEFAULT 0,
+  -- Variation de MMR de chaque joueur sur CE match (peut être négative, voir
+  -- rankedModel.confirmMatch) et durée déclarée par le rapporteur (rawBody.
+  -- durationSec, voir helper/matchPayload.sanitizeDurationSec) — alimentent
+  -- l'historique de parties du profil (GET /api/ranked/matches/history).
+  mmr_change_player1 INT NOT NULL DEFAULT 0,
+  mmr_change_player2 INT NOT NULL DEFAULT 0,
+  duration_sec INT NOT NULL DEFAULT 0,
   FOREIGN KEY (player1_id) REFERENCES users(id) ON DELETE CASCADE,
   FOREIGN KEY (player2_id) REFERENCES users(id) ON DELETE CASCADE,
   FOREIGN KEY (winner_id) REFERENCES users(id) ON DELETE CASCADE
