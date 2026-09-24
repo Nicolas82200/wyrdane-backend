@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 
 import {
 	searchUsers,
+	resolveSteamIds,
 	sendFriendRequest,
 	acceptFriendRequest,
 	deleteFriendship,
@@ -12,6 +13,9 @@ import { getUserId } from "../helper/requestUser";
 
 const MIN_QUERY_LENGTH = 2;
 const MAX_QUERY_LENGTH = 50;
+// Même borne que friendModel.MAX_STEAM_IDS : rejeter ici évite d'aller
+// jusqu'au modèle pour un payload déjà aberrant.
+const MAX_STEAM_IDS = 200;
 
 // GET /api/friends/search?q= — barre de recherche "ajouter un ami" (voir
 // FriendsPanel.gd). Borné à 2 caractères minimum pour éviter de renvoyer une
@@ -29,6 +33,34 @@ const search = async (req: Request, res: Response): Promise<void> => {
 			return;
 		}
 		const results = await searchUsers(query, userId);
+		res.status(200).json(results);
+	} catch (error) {
+		console.error(error);
+		res.status(500).json({ message: "Server error" });
+	}
+};
+
+// POST /api/friends/resolve-steam-ids — reçoit les SteamID64 des amis Steam
+// locaux du joueur (voir SteamService.get_steam_friend_ids côté client) et
+// renvoie ceux qui ont un compte Wyrdane, pour peupler la section "Amis
+// Steam" de FriendsPanel.gd sans recherche manuelle par pseudo.
+const resolveSteamFriends = async (req: Request, res: Response): Promise<void> => {
+	try {
+		const userId = getUserId(req);
+		if (!userId) {
+			res.status(401).json({ message: "Non authentifié" });
+			return;
+		}
+		const steamIds = (req.body as { steamIds?: unknown }).steamIds;
+		if (!Array.isArray(steamIds) || steamIds.length === 0) {
+			res.status(200).json([]);
+			return;
+		}
+		if (steamIds.length > MAX_STEAM_IDS || !steamIds.every((id) => typeof id === "string")) {
+			res.status(400).json({ message: "steamIds invalide" });
+			return;
+		}
+		const results = await resolveSteamIds(steamIds, userId);
 		res.status(200).json(results);
 	} catch (error) {
 		console.error(error);
@@ -140,4 +172,4 @@ const remove = async (req: Request, res: Response): Promise<void> => {
 	}
 };
 
-export { search, list, listIncomingRequests, sendRequest, accept, remove };
+export { search, resolveSteamFriends, list, listIncomingRequests, sendRequest, accept, remove };

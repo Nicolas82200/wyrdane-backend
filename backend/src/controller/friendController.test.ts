@@ -3,6 +3,7 @@ import type { Request, Response } from "express";
 
 vi.mock("../model/friendModel", () => ({
 	searchUsers: vi.fn(),
+	resolveSteamIds: vi.fn(),
 	sendFriendRequest: vi.fn(),
 	acceptFriendRequest: vi.fn(),
 	deleteFriendship: vi.fn(),
@@ -12,16 +13,18 @@ vi.mock("../model/friendModel", () => ({
 
 import {
 	searchUsers,
+	resolveSteamIds,
 	sendFriendRequest,
 	acceptFriendRequest,
 	deleteFriendship,
 	getFriends,
 	getIncomingRequests,
 } from "../model/friendModel";
-import { search, list, listIncomingRequests, sendRequest, accept, remove } from "./friendController";
+import { search, resolveSteamFriends, list, listIncomingRequests, sendRequest, accept, remove } from "./friendController";
 
 const mocked = {
 	searchUsers: searchUsers as ReturnType<typeof vi.fn>,
+	resolveSteamIds: resolveSteamIds as ReturnType<typeof vi.fn>,
 	sendFriendRequest: sendFriendRequest as ReturnType<typeof vi.fn>,
 	acceptFriendRequest: acceptFriendRequest as ReturnType<typeof vi.fn>,
 	deleteFriendship: deleteFriendship as ReturnType<typeof vi.fn>,
@@ -60,6 +63,54 @@ describe("search", () => {
 		const res = mockRes();
 		await search(reqAs(1, { query: { q: "riv" } }), res);
 		expect(mocked.searchUsers).toHaveBeenCalledWith("riv", 1);
+		expect(res.status).toHaveBeenCalledWith(200);
+	});
+});
+
+describe("resolveSteamFriends", () => {
+	beforeEach(() => vi.resetAllMocks());
+
+	it("rejects unauthenticated requests", async () => {
+		const res = mockRes();
+		await resolveSteamFriends(reqAs(undefined, { body: { steamIds: ["111"] } }), res);
+		expect(res.status).toHaveBeenCalledWith(401);
+		expect(mocked.resolveSteamIds).not.toHaveBeenCalled();
+	});
+
+	it("returns an empty array without calling the model when steamIds is missing or empty", async () => {
+		const res = mockRes();
+		await resolveSteamFriends(reqAs(1, { body: {} }), res);
+		expect(mocked.resolveSteamIds).not.toHaveBeenCalled();
+		expect(res.json).toHaveBeenCalledWith([]);
+	});
+
+	it("rejects a non-array steamIds", async () => {
+		const res = mockRes();
+		await resolveSteamFriends(reqAs(1, { body: { steamIds: "111" } }), res);
+		expect(res.status).toHaveBeenCalledWith(200);
+		expect(mocked.resolveSteamIds).not.toHaveBeenCalled();
+	});
+
+	it("rejects a steamIds array longer than the max", async () => {
+		const res = mockRes();
+		const tooMany = Array.from({ length: 201 }, (_, i) => String(i));
+		await resolveSteamFriends(reqAs(1, { body: { steamIds: tooMany } }), res);
+		expect(res.status).toHaveBeenCalledWith(400);
+		expect(mocked.resolveSteamIds).not.toHaveBeenCalled();
+	});
+
+	it("rejects a steamIds array containing non-string entries", async () => {
+		const res = mockRes();
+		await resolveSteamFriends(reqAs(1, { body: { steamIds: [111, "222"] } }), res);
+		expect(res.status).toHaveBeenCalledWith(400);
+		expect(mocked.resolveSteamIds).not.toHaveBeenCalled();
+	});
+
+	it("forwards a valid steamIds list to the model", async () => {
+		mocked.resolveSteamIds.mockResolvedValue([{ id: 2, username: "Rival", steam_id: "222" }]);
+		const res = mockRes();
+		await resolveSteamFriends(reqAs(1, { body: { steamIds: ["222"] } }), res);
+		expect(mocked.resolveSteamIds).toHaveBeenCalledWith(["222"], 1);
 		expect(res.status).toHaveBeenCalledWith(200);
 	});
 });
