@@ -45,7 +45,7 @@ interface TicketRow extends RowDataPacket {
 }
 
 type QueueStatusResult =
-	| { status: "waiting" }
+	| { status: "waiting"; mmr: number; window: number; elapsed_seconds: number }
 	| {
 			status: "matched";
 			role: "host" | "guest";
@@ -195,7 +195,8 @@ const toStatusResult = (ticket: TicketRow): QueueStatusResult => {
 	}
 	if (ticket.status === "cancelled") return { status: "cancelled" };
 	if (ticket.status === "expired") return { status: "expired" };
-	return { status: "waiting" };
+	const elapsed = elapsedSeconds(ticket.created_at);
+	return { status: "waiting", mmr: ticket.mmr, window: windowFor(elapsed), elapsed_seconds: Math.floor(elapsed) };
 };
 
 // Interroge l'état d'un ticket (poll client toutes les 2s). Retente un
@@ -236,7 +237,7 @@ const getQueueStatus = async (userId: number, ticketId: string): Promise<QueueSt
 				return toStatusResult(refreshed[0]);
 			}
 			await connection.commit();
-			return { status: "waiting" };
+			return toStatusResult(ticket);
 		}
 
 		await connection.commit();
