@@ -28,7 +28,7 @@ const getCollectionCount = async (userId: number): Promise<number> => {
 // idx_ranked_stats_season_mmr (season, mmr) — voir schema.sql.
 const getRank = async (mmr: number): Promise<number> => {
 	const [rows] = await db.query<(RowDataPacket & { rank: number })[]>(
-		"SELECT COUNT(*) + 1 AS rank FROM ranked_stats WHERE season = ? AND mmr > ?",
+		"SELECT COUNT(*) + 1 AS `rank` FROM ranked_stats WHERE season = ? AND mmr > ?",
 		[CURRENT_SEASON, mmr],
 	);
 	return rows[0]?.rank ?? 1;
