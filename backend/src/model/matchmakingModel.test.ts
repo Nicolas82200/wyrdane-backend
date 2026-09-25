@@ -64,6 +64,23 @@ const makeConnection = (ownTicket: TicketRow | null, candidateRows: TicketRow[] 
 	return connection;
 };
 
+// Les tests de sélection ci-dessous manipulent plusieurs candidats à la fois :
+// une fabrique évite d'en recopier le détail quatre fois. createdAtOffsetSeconds
+// négatif = ticket plus ancien (en attente depuis plus longtemps).
+const waitingTicket = (id: number, mmr: number, createdAtOffsetSeconds = 0): TicketRow => ({
+	id,
+	ticket_id: `t${id}`,
+	user_id: id,
+	mmr,
+	status: "waiting",
+	opponent_id: null,
+	role: null,
+	steam_lobby_id: null,
+	match_id: null,
+	match_session_token: null,
+	created_at: new Date(NOW.getTime() + createdAtOffsetSeconds * 1000).toISOString(),
+});
+
 const findUpdate = (connection: { query: ReturnType<typeof vi.fn> }, predicate: (sql: string, params: unknown[]) => boolean) =>
 	connection.query.mock.calls.find(
 		([sql, params]) => typeof sql === "string" && Array.isArray(params) && predicate(sql, params),
@@ -228,6 +245,72 @@ describe("matchmakingModel", () => {
 			await joinQueue(1);
 
 			expect(findUpdate(connection, (sql) => sql.startsWith("UPDATE matchmaking_tickets SET status = 'matched'"))).toBeUndefined();
+		});
+
+		it("picks the closest MMR among several eligible candidates", async () => {
+			mockedGetStats.mockResolvedValueOnce({ mmr: 1000 });
+			const randomSpy = vi.spyOn(Math, "random").mockReturnValue(0.1);
+			const myTicket = waitingTicket(1, 1000);
+			// Tous arrivés en même temps : aucun bonus d'ancienneté ne s'applique,
+			// seul l'écart de MMR départage. 1020 est le plus proche de 1000.
+			const connection = makeConnection(myTicket, [
+				waitingTicket(2, 1090),
+				waitingTicket(3, 1020),
+				waitingTicket(4, 1050),
+			]);
+			mockedDb.getConnection.mockResolvedValueOnce(connection);
+
+			await joinQueue(1, "ranked");
+
+			const myUpdate = findUpdate(
+				connection,
+				(sql, params) => sql.startsWith("UPDATE matchmaking_tickets SET status = 'matched'") && params[4] === 1,
+			);
+			expect((myUpdate as unknown[])[0]).toBe(3);
+			randomSpy.mockRestore();
+		});
+
+		it("prefers a long-waiting candidate over a closer one that just arrived", async () => {
+			mockedGetStats.mockResolvedValueOnce({ mmr: 1000 });
+			const randomSpy = vi.spyOn(Math, "random").mockReturnValue(0.1);
+			const myTicket = waitingTicket(1, 1000);
+			// user 3 est plus loin en MMR (90 d'écart contre 20) mais attend depuis
+			// 60s : son bonus d'ancienneté (60 x 5, plafonné à 300) lui donne un score
+			// de -210 contre 20, il passe donc devant. Il reste dans la fenêtre, que
+			// son attente a élargie à +/-300.
+			const connection = makeConnection(myTicket, [waitingTicket(3, 1090, -60), waitingTicket(2, 1020)]);
+			mockedDb.getConnection.mockResolvedValueOnce(connection);
+
+			await joinQueue(1, "ranked");
+
+			const myUpdate = findUpdate(
+				connection,
+				(sql, params) => sql.startsWith("UPDATE matchmaking_tickets SET status = 'matched'") && params[4] === 1,
+			);
+			expect((myUpdate as unknown[])[0]).toBe(3);
+			randomSpy.mockRestore();
+		});
+
+		it("does not let a short wait override a much closer MMR", async () => {
+			mockedGetStats.mockResolvedValueOnce({ mmr: 1000 });
+			const randomSpy = vi.spyOn(Math, "random").mockReturnValue(0.1);
+			const myTicket = waitingTicket(1, 1000);
+			// user 2 est le plus ancien (5s) donc le premier de la liste, et c'est lui
+			// que l'ancienne sélection « premier éligible » retenait. Son bonus
+			// d'ancienneté ne vaut ici que 25 points (5s x 5), score 90 - 25 = 65,
+			// contre 5 pour user 3 qui vient d'arriver mais n'est qu'à 5 points de
+			// MMR : la proximité doit gagner. Garde-fou sur le réglage du bonus.
+			const connection = makeConnection(myTicket, [waitingTicket(2, 1090, -5), waitingTicket(3, 1005)]);
+			mockedDb.getConnection.mockResolvedValueOnce(connection);
+
+			await joinQueue(1, "ranked");
+
+			const myUpdate = findUpdate(
+				connection,
+				(sql, params) => sql.startsWith("UPDATE matchmaking_tickets SET status = 'matched'") && params[4] === 1,
+			);
+			expect((myUpdate as unknown[])[0]).toBe(3);
+			randomSpy.mockRestore();
 		});
 
 		it("rolls back and rethrows if a query fails mid-transaction", async () => {

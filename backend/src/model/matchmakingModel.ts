@@ -18,6 +18,15 @@ const WINDOW_MAX_MMR = 500;
 // cette valeur n'a donc pas besoin d'être plus courte que ça.
 const TICKET_EXPIRY_SECONDS = 300;
 
+// Pondération de l'ancienneté d'un ticket, EXPRIMÉE EN POINTS DE MMR (voir
+// pairingScore). À 5/s plafonné à 300, un candidat qui patiente depuis 20s
+// « vaut » 100 points d'imprécision de MMR : il passe donc devant un adversaire
+// plus proche en MMR mais qui vient d'arriver. Le plafond évite qu'un ticket
+// très ancien ne rende le MMR totalement indifférent — et la fenêtre
+// (windowFor) reste de toute façon la contrainte dure.
+const WAIT_BONUS_MMR_PER_SECOND = 5;
+const WAIT_BONUS_MAX_MMR = 300;
+
 type QueueMode = "ranked" | "normal";
 
 interface TicketRow extends RowDataPacket {
@@ -53,6 +62,22 @@ const elapsedSeconds = (createdAt: string): number => (Date.now() - new Date(cre
 const windowFor = (elapsed: number): number =>
 	Math.min(WINDOW_BASE_MMR + Math.floor(elapsed / WINDOW_STEP_SECONDS) * WINDOW_STEP_MMR, WINDOW_MAX_MMR);
 
+// Départage les candidats DÉJÀ éligibles (dans la fenêtre) en combinant
+// proximité de MMR et ancienneté du ticket — le score le plus BAS gagne :
+//
+//     score = |Δmmr| − BONUS × attente_du_candidat
+//
+// Sans ce score, findOpponent retenait simplement le premier candidat éligible
+// dans l'ordre d'arrivée, donc le ticket le PLUS ANCIEN et jamais le MMR le
+// plus proche : avec plusieurs joueurs en file, un adversaire à 90 points
+// d'écart passait devant un à 20 points s'il attendait depuis plus longtemps.
+// Les deux critères sont désormais combinés (demande utilisateur) : la fenêtre
+// garantit qu'on finit toujours par matcher, le score choisit qui parmi les
+// éligibles.
+const pairingScore = (ticket: TicketRow, candidate: TicketRow): number =>
+	Math.abs(candidate.mmr - ticket.mmr) -
+	Math.min(elapsedSeconds(candidate.created_at) * WAIT_BONUS_MMR_PER_SECOND, WAIT_BONUS_MAX_MMR);
+
 // Cherche un adversaire compatible parmi les autres tickets en attente DU
 // MÊME MODE (jamais un ticket Normal apparié à un ticket Classé — le MMR
 // n'a pas le même sens des deux côtés, voir joinQueue), verrouillés FOR
@@ -60,18 +85,31 @@ const windowFor = (elapsed: number): number =>
 // deux requêtes concurrentes (join + poll d'un tiers en même temps). La
 // fenêtre retenue est la plus large des deux côtés : un joueur qui attend
 // depuis longtemps élargit sa propre fenêtre, suffisant pour matcher même si
-// l'autre vient d'arriver.
+// l'autre vient d'arriver. Parmi TOUS les candidats éligibles, on retient le
+// meilleur au sens de pairingScore (MMR le plus proche, corrigé de
+// l'ancienneté) — et non plus le premier venu.
 const findOpponent = async (connection: PoolConnection, ticket: TicketRow): Promise<TicketRow | null> => {
 	const [candidates] = await connection.query<TicketRow[]>(
 		"SELECT * FROM matchmaking_tickets WHERE status = 'waiting' AND mode = ? AND user_id != ? ORDER BY created_at ASC FOR UPDATE",
 		[ticket.mode, ticket.user_id],
 	);
 	const myWindow = windowFor(elapsedSeconds(ticket.created_at));
+	let best: TicketRow | null = null;
+	let bestScore = Number.POSITIVE_INFINITY;
 	for (const candidate of candidates) {
 		const window = Math.max(myWindow, windowFor(elapsedSeconds(candidate.created_at)));
-		if (Math.abs(candidate.mmr - ticket.mmr) <= window) return candidate;
+		// La fenêtre reste une contrainte DURE : un adversaire hors fenêtre n'est
+		// jamais rattrapé par son ancienneté.
+		if (Math.abs(candidate.mmr - ticket.mmr) > window) continue;
+		const score = pairingScore(ticket, candidate);
+		// Strictement inférieur : à égalité de score, le candidat le plus ancien
+		// gagne, les candidats arrivant triés par created_at ASC.
+		if (score < bestScore) {
+			best = candidate;
+			bestScore = score;
+		}
 	}
-	return null;
+	return best;
 };
 
 // Désigne l'hôte au hasard (50/50) et marque les deux tickets matched en une
