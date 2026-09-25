@@ -74,12 +74,15 @@ const findOpponent = async (connection: PoolConnection, ticket: TicketRow): Prom
 	return null;
 };
 
-// Désigne l'hôte de façon déterministe (le plus petit user_id) et marque les
-// deux tickets matched en une fois — appelé sous transaction avec les deux
-// lignes déjà verrouillées (l'une par le SELECT ... FOR UPDATE de l'appelant,
-// l'autre par le FOR UPDATE de findOpponent).
+// Désigne l'hôte au hasard (50/50) et marque les deux tickets matched en une
+// fois — appelé sous transaction avec les deux lignes déjà verrouillées (l'une
+// par le SELECT ... FOR UPDATE de l'appelant, l'autre par le FOR UPDATE de
+// findOpponent). Autrefois déterministe (le plus petit user_id) : deux
+// joueurs qui se retrouvent régulièrement (ex. entre amis) tombaient TOUJOURS
+// sur le même hôte, l'autre ne pouvant jamais héberger — corrigé sur demande
+// explicite (voir aussi card-game CLAUDE.md, section matchmaking).
 const pairTickets = async (connection: PoolConnection, ticket: TicketRow, opponent: TicketRow): Promise<void> => {
-	const hostId = Math.min(ticket.user_id, opponent.user_id);
+	const hostId = Math.random() < 0.5 ? ticket.user_id : opponent.user_id;
 	// matchId/jeton émis une seule fois ici, à l'appariement réel côté serveur
 	// — voir helper/matchSessionToken.ts et TODO.md P9. Les deux tickets
 	// reçoivent le même matchId/jeton : chaque joueur le relit à son prochain
