@@ -62,7 +62,7 @@ const getConversation = async (
 // pour la liste d'amis complète, indépendante de tout historique de chat).
 const getConversations = async (userId: number): Promise<ConversationRow[]> => {
 	const [rows] = await db.query<ConversationRow[]>(
-		`SELECT partner_id, u.username, m.body AS last_message, m.created_at AS last_message_at,
+		`SELECT latest.partner_id, u.username, m.body AS last_message, m.created_at AS last_message_at,
 		        m.sender_id AS last_sender_id,
 		        COALESCE(unread.unread_count, 0) AS unread_count
 		 FROM (
