@@ -102,8 +102,9 @@ describe("matchmakingModel", () => {
 			expect(findUpdate(connection, (sql) => sql.startsWith("UPDATE matchmaking_tickets SET status = 'matched'"))).toBeUndefined();
 		});
 
-		it("pairs immediately with a compatible waiting opponent", async () => {
+		it("pairs immediately with a compatible waiting opponent, host chosen at random (>=0.5 -> opponent)", async () => {
 			mockedGetStats.mockResolvedValueOnce({ mmr: 1000 });
+			const randomSpy = vi.spyOn(Math, "random").mockReturnValue(0.9);
 			const myTicket: TicketRow = {
 				id: 1,
 				ticket_id: "t1",
@@ -135,9 +136,10 @@ describe("matchmakingModel", () => {
 
 			await joinQueue(5);
 
-			// user_id 2 est le plus petit des deux -> désigné hôte. ticket.id est
-			// maintenant en dernière position (params[4]) : matchId/jeton de
-			// session (params[2]/params[3]) s'insèrent avant, voir pairTickets.
+			// Math.random() mocké à 0.9 (>= 0.5) -> l'adversaire (user_id 2) est
+			// désigné hôte, voir pairTickets. ticket.id est en dernière position
+			// (params[4]) : matchId/jeton de session (params[2]/params[3])
+			// s'insèrent avant.
 			const myUpdate = findUpdate(connection, (sql, params) => sql.startsWith("UPDATE matchmaking_tickets SET status = 'matched'") && params[4] === 1);
 			const opponentUpdate = findUpdate(connection, (sql, params) => sql.startsWith("UPDATE matchmaking_tickets SET status = 'matched'") && params[4] === 2);
 			expect(myUpdate).toEqual([2, "guest", expect.any(String), "mock-session-token", 1]);
@@ -145,6 +147,51 @@ describe("matchmakingModel", () => {
 			// Les deux tickets appariés doivent partager exactement le même
 			// matchId (même appel à issueMatchSessionToken), pas un par ticket.
 			expect((myUpdate as unknown[])[2]).toEqual((opponentUpdate as unknown[])[2]);
+			randomSpy.mockRestore();
+		});
+
+		it("pairs immediately with a compatible waiting opponent, host chosen at random (<0.5 -> caller)", async () => {
+			mockedGetStats.mockResolvedValueOnce({ mmr: 1000 });
+			const randomSpy = vi.spyOn(Math, "random").mockReturnValue(0.1);
+			const myTicket: TicketRow = {
+				id: 1,
+				ticket_id: "t1",
+				user_id: 5,
+				mmr: 1000,
+				status: "waiting",
+				opponent_id: null,
+				role: null,
+				steam_lobby_id: null,
+				match_id: null,
+				match_session_token: null,
+				created_at: NOW.toISOString(),
+			};
+			const opponent: TicketRow = {
+				id: 2,
+				ticket_id: "t2",
+				user_id: 2,
+				mmr: 1050,
+				status: "waiting",
+				opponent_id: null,
+				role: null,
+				steam_lobby_id: null,
+				match_id: null,
+				match_session_token: null,
+				created_at: NOW.toISOString(),
+			};
+			const connection = makeConnection(myTicket, [opponent]);
+			mockedDb.getConnection.mockResolvedValueOnce(connection);
+
+			await joinQueue(5);
+
+			// Math.random() mocké à 0.1 (< 0.5) -> l'appelant (user_id 5, alors
+			// même le plus GRAND des deux) est désigné hôte — preuve que ce n'est
+			// plus déterministe sur le plus petit user_id.
+			const myUpdate = findUpdate(connection, (sql, params) => sql.startsWith("UPDATE matchmaking_tickets SET status = 'matched'") && params[4] === 1);
+			const opponentUpdate = findUpdate(connection, (sql, params) => sql.startsWith("UPDATE matchmaking_tickets SET status = 'matched'") && params[4] === 2);
+			expect(myUpdate).toEqual([2, "host", expect.any(String), "mock-session-token", 1]);
+			expect(opponentUpdate).toEqual([5, "guest", expect.any(String), "mock-session-token", 2]);
+			randomSpy.mockRestore();
 		});
 
 		it("does not pair with an opponent outside the MMR window", async () => {
