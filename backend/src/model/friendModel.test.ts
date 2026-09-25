@@ -15,6 +15,7 @@ import {
 	deleteFriendship,
 	getFriends,
 	resolveSteamIds,
+	autoAddSteamFriends,
 } from "./friendModel";
 
 const mockedDb = db as unknown as { query: ReturnType<typeof vi.fn> };
@@ -161,5 +162,52 @@ describe("resolveSteamIds", () => {
 		const result = await resolveSteamIds(["222"], 1);
 
 		expect(result).toEqual([{ id: 2, username: "Rival", steam_id: "222" }]);
+	});
+});
+
+describe("autoAddSteamFriends", () => {
+	beforeEach(() => vi.clearAllMocks());
+
+	it("creates the friendship as already accepted (no pending step) for a new Steam friend", async () => {
+		mockedDb.query.mockResolvedValueOnce([[{ id: 2, username: "Rival", steam_id: "222" }]]); // resolveSteamIds
+		mockedDb.query.mockResolvedValueOnce([[]]); // findFriendship: no existing relation
+		mockedDb.query.mockResolvedValueOnce([{}]); // INSERT ... status = 'accepted'
+
+		const result = await autoAddSteamFriends(["222"], 1);
+
+		expect(result).toEqual([{ id: 2, username: "Rival", steam_id: "222" }]);
+		const insertCall = mockedDb.query.mock.calls[2];
+		expect(insertCall[0]).toContain("VALUES (?, ?, 'accepted', NOW())");
+		expect(insertCall[1]).toEqual([1, 2]);
+	});
+
+	it("accepts an existing pending request instead of inserting a duplicate", async () => {
+		mockedDb.query.mockResolvedValueOnce([[{ id: 2, username: "Rival", steam_id: "222" }]]); // resolveSteamIds
+		mockedDb.query.mockResolvedValueOnce([[{ id: 9, requester_id: 2, addressee_id: 1, status: "pending" }]]); // findFriendship
+		mockedDb.query.mockResolvedValueOnce([{}]); // UPDATE ... accepted
+
+		await autoAddSteamFriends(["222"], 1);
+
+		const updateCall = mockedDb.query.mock.calls[2];
+		expect(updateCall[0]).toContain("UPDATE friendships SET status = 'accepted'");
+		expect(updateCall[1]).toEqual([9]);
+	});
+
+	it("does nothing extra when already friends", async () => {
+		mockedDb.query.mockResolvedValueOnce([[{ id: 2, username: "Rival", steam_id: "222" }]]); // resolveSteamIds
+		mockedDb.query.mockResolvedValueOnce([[{ id: 9, requester_id: 1, addressee_id: 2, status: "accepted" }]]); // findFriendship
+
+		await autoAddSteamFriends(["222"], 1);
+
+		expect(mockedDb.query).toHaveBeenCalledTimes(2);
+	});
+
+	it("returns an empty array without any write when no Steam friend has a Wyrdane account", async () => {
+		mockedDb.query.mockResolvedValueOnce([[]]); // resolveSteamIds: no match
+
+		const result = await autoAddSteamFriends(["222"], 1);
+
+		expect(result).toEqual([]);
+		expect(mockedDb.query).toHaveBeenCalledTimes(1);
 	});
 });

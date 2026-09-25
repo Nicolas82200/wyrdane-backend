@@ -2,7 +2,7 @@ import { Request, Response } from "express";
 
 import {
 	searchUsers,
-	resolveSteamIds,
+	autoAddSteamFriends,
 	sendFriendRequest,
 	acceptFriendRequest,
 	deleteFriendship,
@@ -42,8 +42,13 @@ const search = async (req: Request, res: Response): Promise<void> => {
 
 // POST /api/friends/resolve-steam-ids — reçoit les SteamID64 des amis Steam
 // locaux du joueur (voir SteamService.get_steam_friend_ids côté client) et
-// renvoie ceux qui ont un compte Wyrdane, pour peupler la section "Amis
-// Steam" de FriendsPanel.gd sans recherche manuelle par pseudo.
+// les ajoute DIRECTEMENT en amis Wyrdane (status "accepted", voir
+// friendModel.autoAcceptFriendship) pour ceux qui ont un compte — la
+// confiance est déjà établie par Steam, pas besoin d'un clic "Ajouter" ni
+// d'acceptation de l'autre côté (voir demande utilisateur du 2026-09-25).
+// Idempotent : rappelable à chaque ouverture du panneau Amis sans dupliquer
+// quoi que ce soit. Renvoie les comptes traités (le client se contente de
+// recharger sa liste d'amis ensuite, voir FriendsPanel._fetch_steam_friends).
 const resolveSteamFriends = async (req: Request, res: Response): Promise<void> => {
 	try {
 		const userId = getUserId(req);
@@ -60,7 +65,7 @@ const resolveSteamFriends = async (req: Request, res: Response): Promise<void> =
 			res.status(400).json({ message: "steamIds invalide" });
 			return;
 		}
-		const results = await resolveSteamIds(steamIds, userId);
+		const results = await autoAddSteamFriends(steamIds, userId);
 		res.status(200).json(results);
 	} catch (error) {
 		console.error(error);

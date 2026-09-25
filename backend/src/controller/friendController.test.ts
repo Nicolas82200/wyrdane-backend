@@ -3,7 +3,7 @@ import type { Request, Response } from "express";
 
 vi.mock("../model/friendModel", () => ({
 	searchUsers: vi.fn(),
-	resolveSteamIds: vi.fn(),
+	autoAddSteamFriends: vi.fn(),
 	sendFriendRequest: vi.fn(),
 	acceptFriendRequest: vi.fn(),
 	deleteFriendship: vi.fn(),
@@ -13,7 +13,7 @@ vi.mock("../model/friendModel", () => ({
 
 import {
 	searchUsers,
-	resolveSteamIds,
+	autoAddSteamFriends,
 	sendFriendRequest,
 	acceptFriendRequest,
 	deleteFriendship,
@@ -24,7 +24,7 @@ import { search, resolveSteamFriends, list, listIncomingRequests, sendRequest, a
 
 const mocked = {
 	searchUsers: searchUsers as ReturnType<typeof vi.fn>,
-	resolveSteamIds: resolveSteamIds as ReturnType<typeof vi.fn>,
+	autoAddSteamFriends: autoAddSteamFriends as ReturnType<typeof vi.fn>,
 	sendFriendRequest: sendFriendRequest as ReturnType<typeof vi.fn>,
 	acceptFriendRequest: acceptFriendRequest as ReturnType<typeof vi.fn>,
 	deleteFriendship: deleteFriendship as ReturnType<typeof vi.fn>,
@@ -74,13 +74,13 @@ describe("resolveSteamFriends", () => {
 		const res = mockRes();
 		await resolveSteamFriends(reqAs(undefined, { body: { steamIds: ["111"] } }), res);
 		expect(res.status).toHaveBeenCalledWith(401);
-		expect(mocked.resolveSteamIds).not.toHaveBeenCalled();
+		expect(mocked.autoAddSteamFriends).not.toHaveBeenCalled();
 	});
 
 	it("returns an empty array without calling the model when steamIds is missing or empty", async () => {
 		const res = mockRes();
 		await resolveSteamFriends(reqAs(1, { body: {} }), res);
-		expect(mocked.resolveSteamIds).not.toHaveBeenCalled();
+		expect(mocked.autoAddSteamFriends).not.toHaveBeenCalled();
 		expect(res.json).toHaveBeenCalledWith([]);
 	});
 
@@ -88,7 +88,7 @@ describe("resolveSteamFriends", () => {
 		const res = mockRes();
 		await resolveSteamFriends(reqAs(1, { body: { steamIds: "111" } }), res);
 		expect(res.status).toHaveBeenCalledWith(200);
-		expect(mocked.resolveSteamIds).not.toHaveBeenCalled();
+		expect(mocked.autoAddSteamFriends).not.toHaveBeenCalled();
 	});
 
 	it("rejects a steamIds array longer than the max", async () => {
@@ -96,21 +96,21 @@ describe("resolveSteamFriends", () => {
 		const tooMany = Array.from({ length: 201 }, (_, i) => String(i));
 		await resolveSteamFriends(reqAs(1, { body: { steamIds: tooMany } }), res);
 		expect(res.status).toHaveBeenCalledWith(400);
-		expect(mocked.resolveSteamIds).not.toHaveBeenCalled();
+		expect(mocked.autoAddSteamFriends).not.toHaveBeenCalled();
 	});
 
 	it("rejects a steamIds array containing non-string entries", async () => {
 		const res = mockRes();
 		await resolveSteamFriends(reqAs(1, { body: { steamIds: [111, "222"] } }), res);
 		expect(res.status).toHaveBeenCalledWith(400);
-		expect(mocked.resolveSteamIds).not.toHaveBeenCalled();
+		expect(mocked.autoAddSteamFriends).not.toHaveBeenCalled();
 	});
 
 	it("forwards a valid steamIds list to the model", async () => {
-		mocked.resolveSteamIds.mockResolvedValue([{ id: 2, username: "Rival", steam_id: "222" }]);
+		mocked.autoAddSteamFriends.mockResolvedValue([{ id: 2, username: "Rival", steam_id: "222" }]);
 		const res = mockRes();
 		await resolveSteamFriends(reqAs(1, { body: { steamIds: ["222"] } }), res);
-		expect(mocked.resolveSteamIds).toHaveBeenCalledWith(["222"], 1);
+		expect(mocked.autoAddSteamFriends).toHaveBeenCalledWith(["222"], 1);
 		expect(res.status).toHaveBeenCalledWith(200);
 	});
 });

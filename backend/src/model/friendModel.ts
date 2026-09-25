@@ -153,6 +153,27 @@ const getIncomingRequests = async (userId: number): Promise<IncomingRequestRow[]
 	return rows;
 };
 
+// Crée (ou accepte) directement une relation "accepted" entre deux joueurs,
+// sans passer par l'étape pending — réservé aux amis Steam déjà vérifiés
+// (voir resolveSteamIds/autoAddSteamFriends ci-dessous) : la confiance est
+// déjà établie par Steam lui-même, redemander une confirmation dans Wyrdane
+// serait une friction inutile (voir demande utilisateur du 2026-09-25 :
+// "je ne veux pas qu'on ait à les rajouter en jeu"). Idempotent : no-op si
+// déjà amis, accepte silencieusement une éventuelle demande pending existante
+// plutôt que d'en créer une seconde.
+const autoAcceptFriendship = async (userId: number, otherId: number): Promise<void> => {
+	const existing = await findFriendship(userId, otherId);
+	if (existing) {
+		if (existing.status === "accepted") return;
+		await db.query("UPDATE friendships SET status = 'accepted', responded_at = NOW() WHERE id = ?", [existing.id]);
+		return;
+	}
+	await db.query(
+		"INSERT INTO friendships (requester_id, addressee_id, status, responded_at) VALUES (?, ?, 'accepted', NOW())",
+		[userId, otherId],
+	);
+};
+
 // Borne le nombre de SteamID64 résolus en un seul appel — la liste d'amis
 // Steam d'un joueur reste de toute façon plafonnée dans les faits (quelques
 // centaines maximum), cette limite protège juste contre un payload construit
@@ -161,10 +182,10 @@ const MAX_STEAM_IDS = 200;
 
 // Résout une liste de SteamID64 (amis Steam locaux du joueur, voir
 // SteamService.get_steam_friend_ids côté client) vers les comptes Wyrdane
-// correspondants — sert à afficher "Amis Steam" dans FriendsPanel.gd sans que
-// le joueur ait à chercher chacun par pseudo. excludeUserId retire le joueur
-// lui-même du résultat (son propre SteamID64 peut apparaître dans sa liste
-// d'amis Steam selon l'API, jamais pertinent ici).
+// correspondants. Résultat consommé par autoAddSteamFriends ci-dessous ;
+// exportée séparément pour rester testable indépendamment de l'écriture.
+// excludeUserId retire le joueur lui-même du résultat (son propre SteamID64
+// peut apparaître dans sa liste d'amis Steam selon l'API, jamais pertinent ici).
 const resolveSteamIds = async (steamIds: string[], excludeUserId: number): Promise<SearchResultRow[]> => {
 	const bounded = steamIds.slice(0, MAX_STEAM_IDS);
 	if (bounded.length === 0) return [];
@@ -179,10 +200,24 @@ const resolveSteamIds = async (steamIds: string[], excludeUserId: number): Promi
 	return rows;
 };
 
+// Résout les amis Steam locaux vers leurs comptes Wyrdane ET les ajoute
+// directement en amis "accepted" (voir autoAcceptFriendship) — appelée à
+// chaque ouverture du panneau Amis côté client, idempotente (n'a d'effet que
+// sur les nouveaux). Renvoie les comptes traités, pour que l'appelant sache
+// combien d'amis Steam ont été synchronisés.
+const autoAddSteamFriends = async (steamIds: string[], userId: number): Promise<SearchResultRow[]> => {
+	const matches = await resolveSteamIds(steamIds, userId);
+	for (const match of matches) {
+		await autoAcceptFriendship(userId, match.id);
+	}
+	return matches;
+};
+
 export {
 	ONLINE_WINDOW_SECONDS,
 	searchUsers,
 	resolveSteamIds,
+	autoAddSteamFriends,
 	findFriendship,
 	sendFriendRequest,
 	acceptFriendRequest,
