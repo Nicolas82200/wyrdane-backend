@@ -2,6 +2,7 @@ DROP DATABASE IF EXISTS wyrdane_game;
 CREATE DATABASE IF NOT EXISTS wyrdane_game CHARACTER SET utf8mb4;
 USE wyrdane_game;
 
+DROP TABLE IF EXISTS game_invites;
 DROP TABLE IF EXISTS deck_cards;
 DROP TABLE IF EXISTS decks;
 DROP TABLE IF EXISTS user_cards;
@@ -560,4 +561,29 @@ CREATE TABLE messages (
   INDEX idx_messages_conversation (sender_id, recipient_id, created_at),
   INDEX idx_messages_recipient_unread (recipient_id, read_at)
 );
+
+-- Invitation de partie entre amis Wyrdane (voir card-game CLAUDE.md « Amis et
+-- chat » / inviteModel.ts) : remplace l'ancien flux par overlay Steam natif
+-- (SteamTransport.invite_friends). L'expéditeur a déjà créé son lobby Steam
+-- côté client avant l'insertion, steam_lobby_id est donc toujours renseigné
+-- dès la création (jamais NULL, contrairement à matchmaking_tickets.steam_lobby_id
+-- qui n'est rempli qu'après appariement). status évolue vers 'accepted' (le
+-- destinataire a rejoint le lobby), 'declined', 'cancelled' (annulée par
+-- l'expéditeur ou par son propre timeout) ou 'expired' (aucune réponse dans le
+-- délai, voir INVITE_EXPIRY_SECONDS côté modèle, vérifié paresseusement à la
+-- lecture — pas de job planifié).
+CREATE TABLE game_invites (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  sender_id INT NOT NULL,
+  recipient_id INT NOT NULL,
+  steam_lobby_id BIGINT NOT NULL,
+  status VARCHAR(10) NOT NULL DEFAULT 'pending',
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  responded_at TIMESTAMP NULL DEFAULT NULL,
+  FOREIGN KEY (sender_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (recipient_id) REFERENCES users(id) ON DELETE CASCADE,
+  INDEX idx_game_invites_recipient_status (recipient_id, status),
+  INDEX idx_game_invites_sender_status (sender_id, status)
+);
+
 INSERT INTO wishlist_stats (id, count) VALUES (1, 0);
