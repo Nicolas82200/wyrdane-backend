@@ -334,4 +334,19 @@ CREATE TABLE IF NOT EXISTS messages (
   INDEX idx_messages_conversation (sender_id, recipient_id, created_at),
   INDEX idx_messages_recipient_unread (recipient_id, read_at)
 );
+
+CREATE TABLE IF NOT EXISTS game_invites (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  sender_id INT NOT NULL,
+  recipient_id INT NOT NULL,
+  steam_lobby_id BIGINT NOT NULL,
+  status VARCHAR(10) NOT NULL DEFAULT 'pending',
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  responded_at TIMESTAMP NULL DEFAULT NULL,
+  FOREIGN KEY (sender_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (recipient_id) REFERENCES users(id) ON DELETE CASCADE,
+  INDEX idx_game_invites_recipient_status (recipient_id, status),
+  INDEX idx_game_invites_sender_status (sender_id, status)
+);
+
 INSERT IGNORE INTO wishlist_stats (id, count) VALUES (1, 0);
