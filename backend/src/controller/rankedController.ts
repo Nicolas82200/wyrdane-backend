@@ -21,6 +21,7 @@ import { progressForMatch as progressWeeklyForMatch } from "../model/weeklyQuest
 import { progressForMatch as progressMonthlyForMatch } from "../model/monthlyQuestModel";
 import { progressForMatch as progressUniqueForMatch, progressForRankTier } from "../model/uniqueQuestModel";
 import { getLevel } from "../model/levelModel";
+import { findFriendship } from "../model/friendModel";
 import { getUserId } from "../helper/requestUser";
 
 const reportMatch = async (req: Request, res: Response): Promise<void> => {
@@ -219,6 +220,38 @@ const getMatchHistoryHandler = async (req: Request, res: Response): Promise<void
 	}
 };
 
+// Même chose que getMatchHistoryHandler mais pour un AUTRE joueur (onglet
+// "Historique" du profil d'un ami, voir GET /api/profile/:userId côté
+// profileController) — restreint aux amis acceptés pour les mêmes raisons
+// que ce profil (expose l'identité d'adversaires tiers).
+const getFriendMatchHistoryHandler = async (req: Request, res: Response): Promise<void> => {
+	try {
+		const viewerId = getUserId(req);
+		if (!viewerId) {
+			res.status(401).json({ message: "Non authentifié" });
+			return;
+		}
+		const targetId = Number(req.params.userId);
+		if (Number.isNaN(targetId)) {
+			res.status(400).json({ message: "Invalid id" });
+			return;
+		}
+		if (targetId !== viewerId) {
+			const friendship = await findFriendship(viewerId, targetId);
+			if (!friendship || friendship.status !== "accepted") {
+				res.status(403).json({ message: "Vous devez être ami avec ce joueur pour voir son historique" });
+				return;
+			}
+		}
+		const limit = Math.min(Number(req.query.limit) || 20, 50);
+		const history = await getMatchHistory(targetId, limit);
+		res.status(200).json(history);
+	} catch (error) {
+		console.error(error);
+		res.status(500).json({ message: "Server error" });
+	}
+};
+
 const getLeaderboardHandler = async (req: Request, res: Response): Promise<void> => {
 	try {
 		const limit = Math.min(Number(req.query.limit) || 50, 100);
@@ -297,6 +330,7 @@ export {
 	reportMatch,
 	getMyStats,
 	getMatchHistoryHandler,
+	getFriendMatchHistoryHandler,
 	getLeaderboardHandler,
 	getMyLeaderboardPositionHandler,
 	getLeaderboardAroundMeHandler,

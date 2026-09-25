@@ -29,6 +29,9 @@ vi.mock("../model/uniqueQuestModel", () => ({
 vi.mock("../model/levelModel", () => ({
 	getLevel: vi.fn(),
 }));
+vi.mock("../model/friendModel", () => ({
+	findFriendship: vi.fn(),
+}));
 
 import {
 	getStats,
@@ -47,11 +50,13 @@ import { progressForMatch as progressWeeklyForMatch } from "../model/weeklyQuest
 import { progressForMatch as progressMonthlyForMatch } from "../model/monthlyQuestModel";
 import { progressForMatch as progressUniqueForMatch, progressForRankTier } from "../model/uniqueQuestModel";
 import { getLevel } from "../model/levelModel";
+import { findFriendship } from "../model/friendModel";
 import { issueMatchSessionToken } from "../helper/matchSessionToken";
 import {
 	reportMatch,
 	getMyStats,
 	getMatchHistoryHandler,
+	getFriendMatchHistoryHandler,
 	getLeaderboardHandler,
 	getMyLeaderboardPositionHandler,
 	searchLeaderboardHandler,
@@ -74,6 +79,7 @@ const mocked = {
 	progressUniqueForMatch: progressUniqueForMatch as ReturnType<typeof vi.fn>,
 	progressForRankTier: progressForRankTier as ReturnType<typeof vi.fn>,
 	getLevel: getLevel as ReturnType<typeof vi.fn>,
+	findFriendship: findFriendship as ReturnType<typeof vi.fn>,
 };
 
 const mockRes = (): Response => {
@@ -462,6 +468,53 @@ describe("getMatchHistoryHandler", () => {
 		await getMatchHistoryHandler(req, res);
 
 		expect(mocked.getMatchHistory).toHaveBeenCalledWith(1, 50);
+	});
+});
+
+describe("getFriendMatchHistoryHandler", () => {
+	beforeEach(() => vi.resetAllMocks());
+
+	it("rejects unauthenticated requests", async () => {
+		const req = { user: undefined, params: { userId: "2" }, query: {} } as unknown as Request;
+		const res = mockRes();
+		await getFriendMatchHistoryHandler(req, res);
+		expect(res.status).toHaveBeenCalledWith(401);
+		expect(mocked.getMatchHistory).not.toHaveBeenCalled();
+	});
+
+	it("rejects a non-numeric userId", async () => {
+		const req = { user: { id: 1 }, params: { userId: "abc" }, query: {} } as unknown as Request;
+		const res = mockRes();
+		await getFriendMatchHistoryHandler(req, res);
+		expect(res.status).toHaveBeenCalledWith(400);
+	});
+
+	it("allows a viewer to fetch their own history without a friendship check", async () => {
+		mocked.getMatchHistory.mockResolvedValue([]);
+		const req = { user: { id: 1 }, params: { userId: "1" }, query: {} } as unknown as Request;
+		const res = mockRes();
+		await getFriendMatchHistoryHandler(req, res);
+		expect(mocked.findFriendship).not.toHaveBeenCalled();
+		expect(mocked.getMatchHistory).toHaveBeenCalledWith(1, 20);
+	});
+
+	it("rejects when the target is not an accepted friend", async () => {
+		mocked.findFriendship.mockResolvedValue(null);
+		const req = { user: { id: 1 }, params: { userId: "2" }, query: {} } as unknown as Request;
+		const res = mockRes();
+		await getFriendMatchHistoryHandler(req, res);
+		expect(res.status).toHaveBeenCalledWith(403);
+		expect(mocked.getMatchHistory).not.toHaveBeenCalled();
+	});
+
+	it("returns the friend's history once the friendship is accepted, capped at 50", async () => {
+		mocked.findFriendship.mockResolvedValue({ id: 9, requester_id: 1, addressee_id: 2, status: "accepted" });
+		mocked.getMatchHistory.mockResolvedValue([]);
+		const req = { user: { id: 1 }, params: { userId: "2" }, query: { limit: "9999" } } as unknown as Request;
+		const res = mockRes();
+		await getFriendMatchHistoryHandler(req, res);
+		expect(mocked.getMatchHistory).toHaveBeenCalledWith(2, 50);
+		expect(res.status).toHaveBeenCalledWith(200);
 	});
 });
 

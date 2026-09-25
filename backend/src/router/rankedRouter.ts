@@ -4,6 +4,7 @@ import {
 	reportMatch,
 	getMyStats,
 	getMatchHistoryHandler,
+	getFriendMatchHistoryHandler,
 	getLeaderboardHandler,
 	getMyLeaderboardPositionHandler,
 	getLeaderboardAroundMeHandler,
@@ -15,6 +16,7 @@ const router = Router();
 
 router.get("/me", getMyStats);
 router.get("/matches/history", getMatchHistoryHandler);
+router.get("/matches/history/:userId", getFriendMatchHistoryHandler);
 // Ordre important : routes littérales avant "/leaderboard" pour ne jamais
 // être capturées par un futur param dynamique - pas de conflit actuel mais
 // garde l'habitude.
