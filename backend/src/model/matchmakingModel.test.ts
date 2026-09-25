@@ -376,6 +376,30 @@ describe("matchmakingModel", () => {
 			expect(findUpdate(connection, (sql) => sql === "UPDATE matchmaking_tickets SET status = 'expired' WHERE id = ?")).toEqual([1]);
 		});
 
+		it("reports own mmr and widening window while still waiting", async () => {
+			// 20s écoulées : fenêtre élargie une fois (WINDOW_STEP_SECONDS = 15) ->
+			// WINDOW_BASE_MMR (100) + WINDOW_STEP_MMR (50) = 150.
+			const waitingTicket: TicketRow = {
+				id: 1,
+				ticket_id: "t1",
+				user_id: 1,
+				mmr: 1234,
+				status: "waiting",
+				opponent_id: null,
+				role: null,
+				steam_lobby_id: null,
+				match_id: null,
+				match_session_token: null,
+				created_at: new Date(NOW.getTime() - 20_000).toISOString(),
+			};
+			const connection = makeConnection(waitingTicket, []);
+			mockedDb.getConnection.mockResolvedValueOnce(connection);
+
+			const result = await getQueueStatus(1, "t1");
+
+			expect(result).toEqual({ status: "waiting", mmr: 1234, window: 150, elapsed_seconds: 20 });
+		});
+
 		it("reports the guest's steam_lobby_id once matched", async () => {
 			const matchedTicket: TicketRow = {
 				id: 1,
