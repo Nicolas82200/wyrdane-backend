@@ -418,6 +418,25 @@ CREATE TABLE unique_quests (
   UNIQUE KEY unique_user_quest_code (user_id, quest_code)
 );
 
+-- Quêtes de progression nouveaux joueurs (niveau de compte 1 à 25) : même
+-- structure que unique_quests (une ligne par joueur/quest_code, jamais
+-- reset), mais la piste entière disparaît côté GET dès que le niveau du
+-- joueur dépasse 25, sauf les quêtes déjà validées avant ce cap (voir
+-- onboardingQuestModel.getOnboardingQuests).
+CREATE TABLE onboarding_quests (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  user_id INT NOT NULL,
+  quest_code VARCHAR(40) NOT NULL,
+  progress INT NOT NULL DEFAULT 0,
+  target INT NOT NULL,
+  reward_currency INT NOT NULL DEFAULT 0,
+  reward_pack INT NOT NULL DEFAULT 0,
+  claimed_at TIMESTAMP NULL DEFAULT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  UNIQUE KEY unique_user_quest_code (user_id, quest_code)
+);
+
 -- Parrainage à sens unique : un joueur ne peut parrainer qu'UN SEUL ami
 -- (referrer_id UNIQUE, contrainte anti-abus posée en base plutôt qu'en
 -- logique applicative) ; un compte ne peut être parrainé qu'une seule fois,

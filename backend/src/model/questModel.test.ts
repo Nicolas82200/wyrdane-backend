@@ -15,6 +15,7 @@ import db from "./db";
 import { credit, getBalance } from "./currencyModel";
 import {
 	QUEST_TEMPLATES,
+	QUESTS_PER_DAY,
 	QuestNotFoundError,
 	QuestNotCompletedError,
 	QuestAlreadyClaimedError,
@@ -44,22 +45,24 @@ const templateRow = (overrides: Partial<Record<string, unknown>> = {}) => ({
 describe("ensureTodayQuests", () => {
 	beforeEach(() => vi.clearAllMocks());
 
-	it("upserts 2 quests then returns them for the day", async () => {
-		mockedDb.query.mockResolvedValue([{}]);
-		mockedDb.query.mockResolvedValueOnce([{}]).mockResolvedValueOnce([{}]).mockResolvedValueOnce([
-			[templateRow({ slot: 0 }), templateRow({ id: 2, slot: 1 })],
+	it("upserts QUESTS_PER_DAY quests then returns them for the day", async () => {
+		for (let slot = 0; slot < QUESTS_PER_DAY; slot++) {
+			mockedDb.query.mockResolvedValueOnce([{}]);
+		}
+		mockedDb.query.mockResolvedValueOnce([
+			[templateRow({ slot: 0 }), templateRow({ id: 2, slot: 1 }), templateRow({ id: 3, slot: 2 })],
 		]);
 
 		const rows = await ensureTodayQuests(1);
 
-		// 2 upserts (ON DUPLICATE KEY UPDATE) + 1 SELECT
-		expect(mockedDb.query).toHaveBeenCalledTimes(3);
+		// QUESTS_PER_DAY upserts (ON DUPLICATE KEY UPDATE) + 1 SELECT
+		expect(mockedDb.query).toHaveBeenCalledTimes(QUESTS_PER_DAY + 1);
 		expect(mockedDb.query).toHaveBeenNthCalledWith(
 			1,
 			expect.stringContaining("ON DUPLICATE KEY UPDATE"),
 			[1, 0, expect.any(String), expect.any(Number), expect.any(Number)],
 		);
-		expect(rows).toHaveLength(2);
+		expect(rows).toHaveLength(3);
 	});
 });
 
@@ -67,8 +70,10 @@ describe("getDailyQuests", () => {
 	beforeEach(() => vi.clearAllMocks());
 
 	it("maps rows to the client-facing shape, including claimed status", async () => {
-		mockedDb.query.mockResolvedValue([{}]);
-		mockedDb.query.mockResolvedValueOnce([{}]).mockResolvedValueOnce([{}]).mockResolvedValueOnce([
+		for (let slot = 0; slot < QUESTS_PER_DAY; slot++) {
+			mockedDb.query.mockResolvedValueOnce([{}]);
+		}
+		mockedDb.query.mockResolvedValueOnce([
 			[templateRow({ progress: 1, claimed_at: null }), templateRow({ id: 2, claimed_at: "2026-08-17T10:00:00Z" })],
 		]);
 
@@ -85,14 +90,15 @@ describe("getDailyQuests", () => {
 describe("progressForMatch", () => {
 	beforeEach(() => vi.clearAllMocks());
 
-	// ensureTodayQuests fait 2 upserts (un par slot) puis 1 SELECT avant que
-	// progressForMatch n'examine les résultats — on doit mettre en file les 2
-	// réponses d'upsert (peu importe leur contenu) avant la ligne du SELECT.
+	// ensureTodayQuests fait QUESTS_PER_DAY upserts (un par slot) puis 1 SELECT
+	// avant que progressForMatch n'examine les résultats — on doit mettre en
+	// file autant de réponses d'upsert (peu importe leur contenu) avant la
+	// ligne du SELECT.
 	const queueEnsureTodayQuests = (rows: unknown[]) => {
-		mockedDb.query
-			.mockResolvedValueOnce([{}])
-			.mockResolvedValueOnce([{}])
-			.mockResolvedValueOnce([rows]);
+		for (let slot = 0; slot < QUESTS_PER_DAY; slot++) {
+			mockedDb.query.mockResolvedValueOnce([{}]);
+		}
+		mockedDb.query.mockResolvedValueOnce([rows]);
 	};
 
 	it("increments a 'play' quest regardless of the match outcome", async () => {
