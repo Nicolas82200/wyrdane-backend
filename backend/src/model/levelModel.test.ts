@@ -21,12 +21,14 @@ vi.mock("./currencyModel", () => ({
 
 import { grantCard, getOwnedQuantity } from "./collectionModel";
 import { credit, creditFreePacks } from "./currencyModel";
-import { xpToReachNextLevel, applyXp } from "./levelModel";
+import db from "./db";
+import { xpToReachNextLevel, applyXp, getRewardCatalog, getUserRewards, claimRewards } from "./levelModel";
 
 const mockedGrantCard = grantCard as ReturnType<typeof vi.fn>;
 const mockedGetOwnedQuantity = getOwnedQuantity as ReturnType<typeof vi.fn>;
 const mockedCredit = credit as ReturnType<typeof vi.fn>;
 const mockedCreditFreePacks = creditFreePacks as ReturnType<typeof vi.fn>;
+const mockedDbQuery = db.query as ReturnType<typeof vi.fn>;
 
 // Connexion factice : route la SELECT level/xp vers `levelRow`, la SELECT de
 // cartes par rareté vers `cardsByRarity[rarity]` (tableau vide par défaut,
@@ -182,5 +184,58 @@ describe("applyXp", () => {
 		expect(result.level).toBe(3);
 		expect(result.xp).toBe(0);
 		expect(result.rewards.map((r) => r.level)).toEqual([2, 3]);
+	});
+});
+
+describe("getRewardCatalog", () => {
+	it("is deterministic and matches rewardKindForLevel", () => {
+		const catalog = getRewardCatalog(1);
+		expect(catalog[0]).toEqual({ level: 2, kind: "gold", gold: 50 });
+		expect(catalog.find((entry) => entry.level === 5)).toEqual({ level: 5, kind: "card", rarity: "Commune" });
+		expect(catalog.find((entry) => entry.level === 25)).toEqual({ level: 25, kind: "pack" });
+		expect(catalog.at(-1)!.level).toBe(60); // CATALOG_MIN_LEVEL
+	});
+
+	it("extends past the player's current level by the lookahead margin", () => {
+		const catalog = getRewardCatalog(80);
+		expect(catalog.at(-1)!.level).toBe(90); // CATALOG_MIN_LEVEL n'est plus le plafond ici
+	});
+});
+
+describe("getUserRewards", () => {
+	beforeEach(() => vi.clearAllMocks());
+
+	it("maps rows to a claimed boolean derived from claimed_at", async () => {
+		mockedDbQuery.mockResolvedValueOnce([
+			[
+				{ level: 2, type: "gold", gold: 50, claimed_at: null },
+				{ level: 3, type: "gold", gold: 75, claimed_at: "2026-09-20 10:00:00" },
+			],
+		]);
+		expect(await getUserRewards(1)).toEqual([
+			{ level: 2, type: "gold", gold: 50, claimed: false },
+			{ level: 3, type: "gold", gold: 75, claimed: true },
+		]);
+	});
+});
+
+describe("claimRewards", () => {
+	beforeEach(() => vi.clearAllMocks());
+
+	it("skips the query entirely for an empty or invalid level list", async () => {
+		expect(await claimRewards(1, [])).toEqual([]);
+		expect(mockedDbQuery).not.toHaveBeenCalled();
+	});
+
+	it("returns only the levels actually marked claimed", async () => {
+		mockedDbQuery
+			.mockResolvedValueOnce([{ affectedRows: 2 }])
+			.mockResolvedValueOnce([[{ level: 2 }, { level: 3 }]]);
+		expect(await claimRewards(1, [2, 3])).toEqual([2, 3]);
+	});
+
+	it("returns an empty array when nothing was updated (already claimed)", async () => {
+		mockedDbQuery.mockResolvedValueOnce([{ affectedRows: 0 }]);
+		expect(await claimRewards(1, [2])).toEqual([]);
 	});
 });

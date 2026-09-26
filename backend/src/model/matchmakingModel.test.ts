@@ -64,6 +64,23 @@ const makeConnection = (ownTicket: TicketRow | null, candidateRows: TicketRow[] 
 	return connection;
 };
 
+// Les tests de sélection ci-dessous manipulent plusieurs candidats à la fois :
+// une fabrique évite d'en recopier le détail quatre fois. createdAtOffsetSeconds
+// négatif = ticket plus ancien (en attente depuis plus longtemps).
+const waitingTicket = (id: number, mmr: number, createdAtOffsetSeconds = 0): TicketRow => ({
+	id,
+	ticket_id: `t${id}`,
+	user_id: id,
+	mmr,
+	status: "waiting",
+	opponent_id: null,
+	role: null,
+	steam_lobby_id: null,
+	match_id: null,
+	match_session_token: null,
+	created_at: new Date(NOW.getTime() + createdAtOffsetSeconds * 1000).toISOString(),
+});
+
 const findUpdate = (connection: { query: ReturnType<typeof vi.fn> }, predicate: (sql: string, params: unknown[]) => boolean) =>
 	connection.query.mock.calls.find(
 		([sql, params]) => typeof sql === "string" && Array.isArray(params) && predicate(sql, params),
@@ -102,8 +119,9 @@ describe("matchmakingModel", () => {
 			expect(findUpdate(connection, (sql) => sql.startsWith("UPDATE matchmaking_tickets SET status = 'matched'"))).toBeUndefined();
 		});
 
-		it("pairs immediately with a compatible waiting opponent", async () => {
+		it("pairs immediately with a compatible waiting opponent, host chosen at random (>=0.5 -> opponent)", async () => {
 			mockedGetStats.mockResolvedValueOnce({ mmr: 1000 });
+			const randomSpy = vi.spyOn(Math, "random").mockReturnValue(0.9);
 			const myTicket: TicketRow = {
 				id: 1,
 				ticket_id: "t1",
@@ -135,9 +153,10 @@ describe("matchmakingModel", () => {
 
 			await joinQueue(5);
 
-			// user_id 2 est le plus petit des deux -> désigné hôte. ticket.id est
-			// maintenant en dernière position (params[4]) : matchId/jeton de
-			// session (params[2]/params[3]) s'insèrent avant, voir pairTickets.
+			// Math.random() mocké à 0.9 (>= 0.5) -> l'adversaire (user_id 2) est
+			// désigné hôte, voir pairTickets. ticket.id est en dernière position
+			// (params[4]) : matchId/jeton de session (params[2]/params[3])
+			// s'insèrent avant.
 			const myUpdate = findUpdate(connection, (sql, params) => sql.startsWith("UPDATE matchmaking_tickets SET status = 'matched'") && params[4] === 1);
 			const opponentUpdate = findUpdate(connection, (sql, params) => sql.startsWith("UPDATE matchmaking_tickets SET status = 'matched'") && params[4] === 2);
 			expect(myUpdate).toEqual([2, "guest", expect.any(String), "mock-session-token", 1]);
@@ -145,6 +164,51 @@ describe("matchmakingModel", () => {
 			// Les deux tickets appariés doivent partager exactement le même
 			// matchId (même appel à issueMatchSessionToken), pas un par ticket.
 			expect((myUpdate as unknown[])[2]).toEqual((opponentUpdate as unknown[])[2]);
+			randomSpy.mockRestore();
+		});
+
+		it("pairs immediately with a compatible waiting opponent, host chosen at random (<0.5 -> caller)", async () => {
+			mockedGetStats.mockResolvedValueOnce({ mmr: 1000 });
+			const randomSpy = vi.spyOn(Math, "random").mockReturnValue(0.1);
+			const myTicket: TicketRow = {
+				id: 1,
+				ticket_id: "t1",
+				user_id: 5,
+				mmr: 1000,
+				status: "waiting",
+				opponent_id: null,
+				role: null,
+				steam_lobby_id: null,
+				match_id: null,
+				match_session_token: null,
+				created_at: NOW.toISOString(),
+			};
+			const opponent: TicketRow = {
+				id: 2,
+				ticket_id: "t2",
+				user_id: 2,
+				mmr: 1050,
+				status: "waiting",
+				opponent_id: null,
+				role: null,
+				steam_lobby_id: null,
+				match_id: null,
+				match_session_token: null,
+				created_at: NOW.toISOString(),
+			};
+			const connection = makeConnection(myTicket, [opponent]);
+			mockedDb.getConnection.mockResolvedValueOnce(connection);
+
+			await joinQueue(5);
+
+			// Math.random() mocké à 0.1 (< 0.5) -> l'appelant (user_id 5, alors
+			// même le plus GRAND des deux) est désigné hôte — preuve que ce n'est
+			// plus déterministe sur le plus petit user_id.
+			const myUpdate = findUpdate(connection, (sql, params) => sql.startsWith("UPDATE matchmaking_tickets SET status = 'matched'") && params[4] === 1);
+			const opponentUpdate = findUpdate(connection, (sql, params) => sql.startsWith("UPDATE matchmaking_tickets SET status = 'matched'") && params[4] === 2);
+			expect(myUpdate).toEqual([2, "host", expect.any(String), "mock-session-token", 1]);
+			expect(opponentUpdate).toEqual([5, "guest", expect.any(String), "mock-session-token", 2]);
+			randomSpy.mockRestore();
 		});
 
 		it("does not pair with an opponent outside the MMR window", async () => {
@@ -181,6 +245,72 @@ describe("matchmakingModel", () => {
 			await joinQueue(1);
 
 			expect(findUpdate(connection, (sql) => sql.startsWith("UPDATE matchmaking_tickets SET status = 'matched'"))).toBeUndefined();
+		});
+
+		it("picks the closest MMR among several eligible candidates", async () => {
+			mockedGetStats.mockResolvedValueOnce({ mmr: 1000 });
+			const randomSpy = vi.spyOn(Math, "random").mockReturnValue(0.1);
+			const myTicket = waitingTicket(1, 1000);
+			// Tous arrivés en même temps : aucun bonus d'ancienneté ne s'applique,
+			// seul l'écart de MMR départage. 1020 est le plus proche de 1000.
+			const connection = makeConnection(myTicket, [
+				waitingTicket(2, 1090),
+				waitingTicket(3, 1020),
+				waitingTicket(4, 1050),
+			]);
+			mockedDb.getConnection.mockResolvedValueOnce(connection);
+
+			await joinQueue(1, "ranked");
+
+			const myUpdate = findUpdate(
+				connection,
+				(sql, params) => sql.startsWith("UPDATE matchmaking_tickets SET status = 'matched'") && params[4] === 1,
+			);
+			expect((myUpdate as unknown[])[0]).toBe(3);
+			randomSpy.mockRestore();
+		});
+
+		it("prefers a long-waiting candidate over a closer one that just arrived", async () => {
+			mockedGetStats.mockResolvedValueOnce({ mmr: 1000 });
+			const randomSpy = vi.spyOn(Math, "random").mockReturnValue(0.1);
+			const myTicket = waitingTicket(1, 1000);
+			// user 3 est plus loin en MMR (90 d'écart contre 20) mais attend depuis
+			// 60s : son bonus d'ancienneté (60 x 5, plafonné à 300) lui donne un score
+			// de -210 contre 20, il passe donc devant. Il reste dans la fenêtre, que
+			// son attente a élargie à +/-300.
+			const connection = makeConnection(myTicket, [waitingTicket(3, 1090, -60), waitingTicket(2, 1020)]);
+			mockedDb.getConnection.mockResolvedValueOnce(connection);
+
+			await joinQueue(1, "ranked");
+
+			const myUpdate = findUpdate(
+				connection,
+				(sql, params) => sql.startsWith("UPDATE matchmaking_tickets SET status = 'matched'") && params[4] === 1,
+			);
+			expect((myUpdate as unknown[])[0]).toBe(3);
+			randomSpy.mockRestore();
+		});
+
+		it("does not let a short wait override a much closer MMR", async () => {
+			mockedGetStats.mockResolvedValueOnce({ mmr: 1000 });
+			const randomSpy = vi.spyOn(Math, "random").mockReturnValue(0.1);
+			const myTicket = waitingTicket(1, 1000);
+			// user 2 est le plus ancien (5s) donc le premier de la liste, et c'est lui
+			// que l'ancienne sélection « premier éligible » retenait. Son bonus
+			// d'ancienneté ne vaut ici que 25 points (5s x 5), score 90 - 25 = 65,
+			// contre 5 pour user 3 qui vient d'arriver mais n'est qu'à 5 points de
+			// MMR : la proximité doit gagner. Garde-fou sur le réglage du bonus.
+			const connection = makeConnection(myTicket, [waitingTicket(2, 1090, -5), waitingTicket(3, 1005)]);
+			mockedDb.getConnection.mockResolvedValueOnce(connection);
+
+			await joinQueue(1, "ranked");
+
+			const myUpdate = findUpdate(
+				connection,
+				(sql, params) => sql.startsWith("UPDATE matchmaking_tickets SET status = 'matched'") && params[4] === 1,
+			);
+			expect((myUpdate as unknown[])[0]).toBe(3);
+			randomSpy.mockRestore();
 		});
 
 		it("rolls back and rethrows if a query fails mid-transaction", async () => {
@@ -244,6 +374,30 @@ describe("matchmakingModel", () => {
 
 			expect(result).toEqual({ status: "expired" });
 			expect(findUpdate(connection, (sql) => sql === "UPDATE matchmaking_tickets SET status = 'expired' WHERE id = ?")).toEqual([1]);
+		});
+
+		it("reports own mmr and widening window while still waiting", async () => {
+			// 20s écoulées : fenêtre élargie une fois (WINDOW_STEP_SECONDS = 15) ->
+			// WINDOW_BASE_MMR (100) + WINDOW_STEP_MMR (50) = 150.
+			const waitingTicket: TicketRow = {
+				id: 1,
+				ticket_id: "t1",
+				user_id: 1,
+				mmr: 1234,
+				status: "waiting",
+				opponent_id: null,
+				role: null,
+				steam_lobby_id: null,
+				match_id: null,
+				match_session_token: null,
+				created_at: new Date(NOW.getTime() - 20_000).toISOString(),
+			};
+			const connection = makeConnection(waitingTicket, []);
+			mockedDb.getConnection.mockResolvedValueOnce(connection);
+
+			const result = await getQueueStatus(1, "t1");
+
+			expect(result).toEqual({ status: "waiting", mmr: 1234, window: 150, elapsed_seconds: 20 });
 		});
 
 		it("reports the guest's steam_lobby_id once matched", async () => {

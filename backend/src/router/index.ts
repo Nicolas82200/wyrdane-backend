@@ -9,11 +9,18 @@ import authRouter from "./authRouter";
 import cardRouter from "./cardRouter";
 import collectionRouter from "./collectionRouter";
 import contactRouter from "./contactRouter";
+import crashReportRouter from "./crashReportRouter";
 import currencyRouter from "./currencyRouter";
+import debugRouter from "./debugRouter";
 import deckRouter from "./deckRouter";
+import friendRouter from "./friendRouter";
+import inviteRouter from "./inviteRouter";
+import levelRouter from "./levelRouter";
 import loginRewardRouter from "./loginRewardRouter";
 import matchmakingRouter from "./matchmakingRouter";
+import messageRouter from "./messageRouter";
 import packRouter from "./packRouter";
+import presenceRouter from "./presenceRouter";
 import profileRouter from "./profileRouter";
 import questRouter from "./questRouter";
 import rankedRouter from "./rankedRouter";
@@ -27,8 +34,8 @@ const router = Router();
 
 // requireCsrfHeader après authorization sur chaque routeur authentifié par
 // cookie (voir middleware/csrf.ts) : /auth (login, pas encore de session),
-// /contact et /analytics (pas de cookie de session, pas de CORS credentials à
-// détourner) restent volontairement hors de sa portée.
+// /contact, /analytics et /crash-report (pas de cookie de session, pas de CORS
+// credentials à détourner) restent volontairement hors de sa portée.
 router.use("/users", authorization, requireCsrfHeader, userRouter);
 router.use("/auth", authRouter);
 
@@ -38,11 +45,21 @@ router.use("/analytics", analyticsRouter);
 router.use("/cards", authorization, requireCsrfHeader, cardRouter);
 router.use("/collection", authorization, requireCsrfHeader, collectionRouter);
 router.use("/contact", contactRouter);
+router.use("/crash-report", crashReportRouter);
 router.use("/currency", authorization, requireCsrfHeader, currencyRouter);
+// Diagnostic TEMPORAIRE (voir debugRouter.ts) : pas d'authorization/CSRF, la
+// clé statique x-debug-key en tient lieu — à retirer une fois le diagnostic
+// matchmaking classé terminé.
+router.use("/debug", debugRouter);
 router.use("/decks", authorization, requireCsrfHeader, deckRouter);
+router.use("/friends", authorization, requireCsrfHeader, friendRouter);
+router.use("/invites", authorization, requireCsrfHeader, inviteRouter);
+router.use("/level", authorization, requireCsrfHeader, levelRouter);
 router.use("/login-reward", authorization, requireCsrfHeader, loginRewardRouter);
 router.use("/matchmaking", authorization, requireCsrfHeader, matchmakingRouter);
+router.use("/messages", authorization, requireCsrfHeader, messageRouter);
 router.use("/packs", authorization, requireCsrfHeader, packRouter);
+router.use("/presence", authorization, requireCsrfHeader, presenceRouter);
 router.use("/profile", authorization, requireCsrfHeader, profileRouter);
 router.use("/quests", authorization, requireCsrfHeader, questRouter);
 router.use("/ranked", authorization, requireCsrfHeader, rankedRouter);

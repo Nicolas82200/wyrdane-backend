@@ -2,11 +2,13 @@ DROP DATABASE IF EXISTS wyrdane_game;
 CREATE DATABASE IF NOT EXISTS wyrdane_game CHARACTER SET utf8mb4;
 USE wyrdane_game;
 
+DROP TABLE IF EXISTS game_invites;
 DROP TABLE IF EXISTS deck_cards;
 DROP TABLE IF EXISTS decks;
 DROP TABLE IF EXISTS user_cards;
 DROP TABLE IF EXISTS daily_quests;
 DROP TABLE IF EXISTS weekly_quests;
+DROP TABLE IF EXISTS monthly_quests;
 DROP TABLE IF EXISTS unique_quests;
 DROP TABLE IF EXISTS referrals;
 DROP TABLE IF EXISTS login_rewards;
@@ -66,7 +68,16 @@ CREATE TABLE users (
   -- chaque niveau franchi (carte tous les 5, pack tous les 25, or sinon) —
   -- voir levelModel.rewardKindForLevel.
   level INT NOT NULL DEFAULT 1,
-  xp INT NOT NULL DEFAULT 0
+  xp INT NOT NULL DEFAULT 0,
+  -- Présence (voir presenceModel.ts, POST /api/presence/heartbeat) : le
+  -- client envoie un heartbeat périodique tant que le jeu tourne. En ligne =
+  -- last_heartbeat_at récent (fenêtre glissante, voir ONLINE_WINDOW_SECONDS
+  -- côté modèle, pas de colonne "online" séparée qui pourrait désync si le
+  -- process du joueur meurt sans prévenir). in_game reflète juste si le
+  -- dernier heartbeat a été envoyé depuis une bataille, jamais affiché sans
+  -- last_heartbeat_at récent.
+  last_heartbeat_at TIMESTAMP NULL DEFAULT NULL,
+  in_game BOOLEAN NOT NULL DEFAULT FALSE
 );
 
 -- Une ligne par identité liée (Steam aujourd'hui, potentiellement email/Google/Apple
@@ -135,9 +146,16 @@ CREATE TABLE deck_cards (
 -- remise à 0 par n'importe quelle défaite (voir rankedModel.confirmMatch) —
 -- pur stat d'affichage côté client depuis le retrait du barème d'or par
 -- match (voir levelModel.ts), distinct de `wins` qui ne fait qu'accumuler.
+-- hidden_mmr : MMR caché (même formule Elo que `mmr`, jamais affiché ni
+-- exposé au leaderboard) utilisé uniquement pour apparier les parties
+-- "Normal" par niveau, façon MMR caché League of Legends — voir
+-- matchmakingModel.ts/rankedModel.confirmMatch. Totalement indépendant de
+-- `mmr`/wins/losses/win_streak : une partie Normal ne fait jamais gagner ou
+-- perdre de points de classement, seul le Classé touche à ces colonnes.
 CREATE TABLE ranked_stats (
   user_id INT PRIMARY KEY,
-  mmr INT NOT NULL DEFAULT 1000,
+  mmr INT NOT NULL DEFAULT 0,
+  hidden_mmr INT NOT NULL DEFAULT 0,
   wins INT NOT NULL DEFAULT 0,
   losses INT NOT NULL DEFAULT 0,
   win_streak INT NOT NULL DEFAULT 0,
@@ -155,11 +173,16 @@ CREATE TABLE ranked_stats (
 -- opponent_id ne sont renseignés qu'une fois status = matched. steam_lobby_id
 -- en BIGINT (SteamID de lobby 64 bits), NULL tant que l'hôte n'a pas encore
 -- appelé report-lobby — voir matchmakingModel.ts.
+-- mode : 'ranked' (apparié sur ranked_stats.mmr, le MMR public affiché) ou
+-- 'normal' (apparié sur ranked_stats.hidden_mmr, jamais affiché) — deux
+-- joueurs ne sont jamais appariés entre modes différents, voir
+-- matchmakingModel.findOpponent.
 CREATE TABLE matchmaking_tickets (
   id INT AUTO_INCREMENT PRIMARY KEY,
   ticket_id VARCHAR(36) NOT NULL,
   user_id INT NOT NULL,
   mmr INT NOT NULL,
+  mode VARCHAR(10) NOT NULL DEFAULT 'ranked',
   status VARCHAR(20) NOT NULL DEFAULT 'waiting',
   opponent_id INT NULL,
   role VARCHAR(10) NULL,
@@ -200,6 +223,29 @@ CREATE TABLE login_rewards (
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
+-- Une ligne par récompense de niveau réellement octroyée (voir
+-- levelModel.grantLevelReward, appelé dans applyXp dès qu'un palier est
+-- franchi) : l'octroi (crédit d'or/carte/pack) reste immédiat et automatique
+-- comme avant, cette table ne fait que le journaliser pour que le client
+-- puisse l'afficher plus tard dans la popup de récompenses de niveau et le
+-- marquer comme "vu" (claimed_at) — claimed_at ne déclenche aucun nouveau
+-- crédit, c'est un simple accusé de réception côté joueur (voir
+-- levelModel.claimRewards). Pas de card_id : la carte précise obtenue n'est
+-- jamais affichée (même convention que GameOverScreen.show_xp_reward côté
+-- client, qui n'affiche que la rareté) ; celle-ci est de toute façon
+-- déterministe à partir du niveau (voir rewardKindForLevel), inutile de la
+-- dupliquer ici.
+CREATE TABLE level_rewards (
+  user_id INT NOT NULL,
+  level INT NOT NULL,
+  type ENUM('card', 'pack', 'gold') NOT NULL,
+  gold INT NOT NULL DEFAULT 0,
+  granted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  claimed_at TIMESTAMP NULL DEFAULT NULL,
+  PRIMARY KEY (user_id, level),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
 -- Un match confirmé n'existe ici qu'une fois que les deux rapports (voir
 -- match_reports) concordent sur le vainqueur.
 CREATE TABLE match_history (
@@ -216,6 +262,13 @@ CREATE TABLE match_history (
   -- le recalculer, client_match_id étant UNIQUE.
   xp_awarded_player1 INT NOT NULL DEFAULT 0,
   xp_awarded_player2 INT NOT NULL DEFAULT 0,
+  -- Variation de MMR de chaque joueur sur CE match (peut être négative, voir
+  -- rankedModel.confirmMatch) et durée déclarée par le rapporteur (rawBody.
+  -- durationSec, voir helper/matchPayload.sanitizeDurationSec) — alimentent
+  -- l'historique de parties du profil (GET /api/ranked/matches/history).
+  mmr_change_player1 INT NOT NULL DEFAULT 0,
+  mmr_change_player2 INT NOT NULL DEFAULT 0,
+  duration_sec INT NOT NULL DEFAULT 0,
   FOREIGN KEY (player1_id) REFERENCES users(id) ON DELETE CASCADE,
   FOREIGN KEY (player2_id) REFERENCES users(id) ON DELETE CASCADE,
   FOREIGN KEY (winner_id) REFERENCES users(id) ON DELETE CASCADE
@@ -235,14 +288,42 @@ CREATE TABLE match_reports (
   reporter_id INT NOT NULL,
   opponent_id INT NOT NULL,
   winner_id INT NOT NULL,
+  -- 'ranked' | 'normal' — déclaré par chaque reporter (voir Battle.is_ranked_match
+  -- côté card-game), vérifié concordant entre les deux rapports avant
+  -- confirmMatch (comme winner_id) : décide si le MMR PUBLIC (classé) ou le
+  -- MMR caché (Normal) est mis à jour, voir rankedModel.confirmMatch.
+  mode VARCHAR(10) NOT NULL DEFAULT 'ranked',
   season INT NOT NULL,
   cards_played_by_race JSON NULL,
   deck_races JSON NULL,
+  -- Liste brute des cartes posées par le reporter (doublons inclus si jouée
+  -- plusieurs fois), utilisée une fois le match confirmé pour alimenter
+  -- card_play_stats (équilibrage) — voir
+  -- docs/backend-contracts/card-stats-and-leaderboard.md côté card-game.
+  cards_played JSON NULL,
   reported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (reporter_id) REFERENCES users(id) ON DELETE CASCADE,
   FOREIGN KEY (opponent_id) REFERENCES users(id) ON DELETE CASCADE,
   FOREIGN KEY (winner_id) REFERENCES users(id) ON DELETE CASCADE,
   UNIQUE KEY unique_match_reporter (client_match_id, reporter_id)
+);
+
+-- Une ligne par (carte, match, joueur qui l'a jouée) — voir
+-- rankedModel.recordCardPlays, appelé une seule fois par match confirmé
+-- (même court-circuit findMatchHistory que le reste de reportMatch). Sert
+-- uniquement de signal d'équilibrage (taux de jeu/winrate par carte, voir
+-- rankedModel.getCardStats) — jamais consultée pour l'autorité MMR/victoire.
+CREATE TABLE card_play_stats (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  card_name VARCHAR(150) NOT NULL,
+  client_match_id VARCHAR(100) NOT NULL,
+  user_id INT NOT NULL,
+  won BOOLEAN NOT NULL,
+  season INT NOT NULL,
+  played_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  UNIQUE KEY unique_card_match_user (card_name, client_match_id, user_id),
+  INDEX idx_card_play_stats_card_name (card_name)
 );
 
 -- Assignation/progression des 3 quêtes quotidiennes d'un joueur (le contenu
@@ -283,6 +364,31 @@ CREATE TABLE weekly_quests (
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
   UNIQUE KEY unique_user_quest_week_slot (user_id, week_start, slot)
+);
+
+-- Quêtes mensuelles : même principe que weekly_quests (rotation par slot,
+-- reset périodique) mais objectifs plus longs et récompense double (or +
+-- packs, comme unique_quests) pour une grosse récompense mensuelle. Le
+-- dernier slot (LOGIN_STREAK_SLOT côté monthlyQuestModel) n'est jamais tiré
+-- au sort : toujours la quête de connexion quotidienne, plus grosse
+-- récompense du mois. last_progress_date sert de verrou anti-double-compte
+-- le même jour pour cette quête (NULL/inutilisé pour les autres objectifs).
+-- month_start = 1er du mois courant (calculé côté SQL, jamais côté JS).
+CREATE TABLE monthly_quests (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  user_id INT NOT NULL,
+  month_start DATE NOT NULL,
+  slot TINYINT NOT NULL,
+  quest_code VARCHAR(30) NOT NULL,
+  progress INT NOT NULL DEFAULT 0,
+  target INT NOT NULL,
+  reward_currency INT NOT NULL DEFAULT 0,
+  reward_pack INT NOT NULL DEFAULT 0,
+  last_progress_date DATE NULL DEFAULT NULL,
+  claimed_at TIMESTAMP NULL DEFAULT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  UNIQUE KEY unique_user_quest_month_slot (user_id, month_start, slot)
 );
 
 -- Quêtes uniques (one-shot) : contrairement à daily_quests/weekly_quests,
@@ -429,4 +535,74 @@ CREATE TABLE wishlist_stats (
   count INT NOT NULL DEFAULT 0,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
+
+-- Système d'amis Wyrdane (distinct de la liste d'amis Steam, voir CLAUDE.md
+-- « Système d'amis Wyrdane + chat ») : une ligne par relation, dans un seul
+-- sens (requester -> addressee) avec un statut qui évolue plutôt que deux
+-- lignes symétriques. status='pending' tant que l'addressee n'a pas répondu ;
+-- 'accepted' une fois la demande acceptée (relation alors bidirectionnelle en
+-- lecture, voir friendModel.getFriends qui matche sur les deux colonnes).
+-- Une demande refusée est supprimée (pas de status='declined' persistant) :
+-- rien n'empêche de redemander plus tard, pas de compteur à faire vieillir.
+-- UNIQUE sur (requester_id, addressee_id) : un même joueur ne peut avoir
+-- qu'une seule relation en cours (pending ou accepted) vers un autre,
+-- vérifié en app (findFriendship dans les deux sens) avant tout INSERT pour
+-- éviter la paire inverse redondante (voir sendFriendRequest, qui auto-accepte
+-- si une demande inverse pending existe déjà, comme un "vous êtes déjà amis").
+CREATE TABLE friendships (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  requester_id INT NOT NULL,
+  addressee_id INT NOT NULL,
+  status VARCHAR(10) NOT NULL DEFAULT 'pending',
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  responded_at TIMESTAMP NULL DEFAULT NULL,
+  FOREIGN KEY (requester_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (addressee_id) REFERENCES users(id) ON DELETE CASCADE,
+  UNIQUE KEY unique_friend_pair (requester_id, addressee_id),
+  INDEX idx_friendships_addressee_status (addressee_id, status),
+  INDEX idx_friendships_requester_status (requester_id, status)
+);
+
+-- Messagerie privée entre amis (voir CLAUDE.md « Système d'amis Wyrdane +
+-- chat ») : une ligne par message envoyé, jamais éditée après coup (read_at
+-- est la seule colonne mise à jour, quand le destinataire ouvre la
+-- conversation). Historique conservé indéfiniment (décision utilisateur, pas
+-- de purge automatique) — voir messageModel.ts.
+CREATE TABLE messages (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  sender_id INT NOT NULL,
+  recipient_id INT NOT NULL,
+  body VARCHAR(500) NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  read_at TIMESTAMP NULL DEFAULT NULL,
+  FOREIGN KEY (sender_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (recipient_id) REFERENCES users(id) ON DELETE CASCADE,
+  INDEX idx_messages_conversation (sender_id, recipient_id, created_at),
+  INDEX idx_messages_recipient_unread (recipient_id, read_at)
+);
+
+-- Invitation de partie entre amis Wyrdane (voir card-game CLAUDE.md « Amis et
+-- chat » / inviteModel.ts) : remplace l'ancien flux par overlay Steam natif
+-- (SteamTransport.invite_friends). L'expéditeur a déjà créé son lobby Steam
+-- côté client avant l'insertion, steam_lobby_id est donc toujours renseigné
+-- dès la création (jamais NULL, contrairement à matchmaking_tickets.steam_lobby_id
+-- qui n'est rempli qu'après appariement). status évolue vers 'accepted' (le
+-- destinataire a rejoint le lobby), 'declined', 'cancelled' (annulée par
+-- l'expéditeur ou par son propre timeout) ou 'expired' (aucune réponse dans le
+-- délai, voir INVITE_EXPIRY_SECONDS côté modèle, vérifié paresseusement à la
+-- lecture — pas de job planifié).
+CREATE TABLE game_invites (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  sender_id INT NOT NULL,
+  recipient_id INT NOT NULL,
+  steam_lobby_id BIGINT NOT NULL,
+  status VARCHAR(10) NOT NULL DEFAULT 'pending',
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  responded_at TIMESTAMP NULL DEFAULT NULL,
+  FOREIGN KEY (sender_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (recipient_id) REFERENCES users(id) ON DELETE CASCADE,
+  INDEX idx_game_invites_recipient_status (recipient_id, status),
+  INDEX idx_game_invites_sender_status (sender_id, status)
+);
+
 INSERT INTO wishlist_stats (id, count) VALUES (1, 0);

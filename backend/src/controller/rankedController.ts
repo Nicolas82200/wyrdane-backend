@@ -6,15 +6,23 @@ import {
 	findReport,
 	createReport,
 	confirmMatch,
+	getMatchHistory,
 	getLeaderboard,
+	getMyLeaderboardPosition,
+	getLeaderboardAroundUser,
+	searchLeaderboard,
+	recordCardPlays,
 } from "../model/rankedModel";
-import { sanitizeCardsPlayedByRace, sanitizeDeckRaces } from "../helper/matchPayload";
+import type { MatchMode } from "../model/rankedModel";
+import { sanitizeCardsPlayedByRace, sanitizeDeckRaces, sanitizeCardsPlayed, sanitizeDurationSec } from "../helper/matchPayload";
 import { verifyMatchSessionToken } from "../helper/matchSessionToken";
 import { progressForMatch } from "../model/questModel";
 import { progressForMatch as progressWeeklyForMatch } from "../model/weeklyQuestModel";
+import { progressForMatch as progressMonthlyForMatch } from "../model/monthlyQuestModel";
 import { progressForMatch as progressUniqueForMatch, progressForRankTier } from "../model/uniqueQuestModel";
 import { progressForMatch as progressOnboardingForMatch } from "../model/onboardingQuestModel";
 import { getLevel } from "../model/levelModel";
+import { findFriendship } from "../model/friendModel";
 import { getUserId } from "../helper/requestUser";
 
 const reportMatch = async (req: Request, res: Response): Promise<void> => {
@@ -31,9 +39,17 @@ const reportMatch = async (req: Request, res: Response): Promise<void> => {
 			winnerId?: number;
 			cardsPlayedByRace?: Record<string, number>;
 			deckRaces?: string[];
+			cardsPlayed?: string[];
 			matchSessionToken?: string;
+			mode?: string;
+			durationSec?: number;
 		};
 		const { clientMatchId, opponentId, winnerId, matchSessionToken } = rawBody;
+		// "ranked" par défaut : tolère un client pas encore mis à jour (avant le
+		// MMR caché Normal) qui n'enverrait pas ce champ — un match rapporté sans
+		// mode reste traité comme classé, comportement historique inchangé.
+		const mode: MatchMode = rawBody.mode === "normal" ? "normal" : "ranked";
+		const durationSec = sanitizeDurationSec(rawBody.durationSec);
 
 		if (
 			!clientMatchId ||
@@ -73,6 +89,7 @@ const reportMatch = async (req: Request, res: Response): Promise<void> => {
 		// ne peut plus fausser plusieurs quêtes/plusieurs races d'un coup.
 		const cardsPlayedByRace = sanitizeCardsPlayedByRace(rawBody.cardsPlayedByRace);
 		const deckRaces = sanitizeDeckRaces(rawBody.deckRaces);
+		const cardsPlayed = sanitizeCardsPlayed(rawBody.cardsPlayed);
 
 		const existingMatch = await findMatchHistory(clientMatchId);
 		if (existingMatch) {
@@ -100,7 +117,7 @@ const reportMatch = async (req: Request, res: Response): Promise<void> => {
 			return;
 		}
 
-		await createReport(clientMatchId, userId, opponentId, winnerId, cardsPlayedByRace ?? null, deckRaces ?? null);
+		await createReport(clientMatchId, userId, opponentId, winnerId, cardsPlayedByRace ?? null, deckRaces ?? null, cardsPlayed ?? null, mode);
 
 		const opponentReport = await findReport(clientMatchId, opponentId);
 		if (!opponentReport) {
@@ -110,7 +127,8 @@ const reportMatch = async (req: Request, res: Response): Promise<void> => {
 
 		if (
 			opponentReport.opponent_id !== userId ||
-			opponentReport.winner_id !== winnerId
+			opponentReport.winner_id !== winnerId ||
+			opponentReport.mode !== mode
 		) {
 			res.status(409).json({ status: "conflict", message: "Les rapports des deux joueurs ne concordent pas" });
 			return;
@@ -121,12 +139,16 @@ const reportMatch = async (req: Request, res: Response): Promise<void> => {
 			userId,
 			opponentId,
 			winnerId,
+			mode,
+			durationSec,
 		);
 		// Une fois par joueur, jamais deux fois (confirmMatch ne s'exécute qu'une
 		// seule fois par match — voir le court-circuit findMatchHistory plus haut).
 		// Chaque joueur ne fait progresser ses quêtes de race qu'avec les données
 		// qu'il a lui-même déclarées dans son propre rapport (jamais celles de
 		// l'adversaire, qui ne connaît pas son deck).
+		await recordCardPlays(clientMatchId, userId, cardsPlayed, winnerId === userId);
+		await recordCardPlays(clientMatchId, opponentId, opponentReport.cards_played ?? undefined, winnerId === opponentId);
 		await progressForMatch(userId, "ranked", winnerId === userId, { cardsPlayedByRace, deckRaces });
 		await progressForMatch(opponentId, "ranked", winnerId === opponentId, {
 			cardsPlayedByRace: opponentReport.cards_played_by_race ?? undefined,
@@ -137,14 +159,24 @@ const reportMatch = async (req: Request, res: Response): Promise<void> => {
 			cardsPlayedByRace: opponentReport.cards_played_by_race ?? undefined,
 			deckRaces: opponentReport.deck_races ?? undefined,
 		});
+		await progressMonthlyForMatch(userId, "ranked", winnerId === userId, { cardsPlayedByRace, deckRaces });
+		await progressMonthlyForMatch(opponentId, "ranked", winnerId === opponentId, {
+			cardsPlayedByRace: opponentReport.cards_played_by_race ?? undefined,
+			deckRaces: opponentReport.deck_races ?? undefined,
+		});
 		await progressUniqueForMatch(userId, "ranked", winnerId === userId, { deckRaces });
 		await progressUniqueForMatch(opponentId, "ranked", winnerId === opponentId, {
 			deckRaces: opponentReport.deck_races ?? undefined,
 		});
 		// ratingA/ratingB = MMR post-match de userId/opponentId respectivement
 		// (confirmMatch(clientMatchId, userId, opponentId, ...) → player1=userId).
-		await progressForRankTier(userId, ratingA);
-		await progressForRankTier(opponentId, ratingB);
+		// Uniquement en classé : en mode "normal" ratingA/ratingB sont le MMR
+		// CACHÉ (jamais affiché), qui ne doit jamais faire progresser un succès
+		// de palier de classement public.
+		if (mode === "ranked") {
+			await progressForRankTier(userId, ratingA);
+			await progressForRankTier(opponentId, ratingB);
+		}
 		// `level` = niveau post-match de userId, déjà destructuré ci-dessus ;
 		// celui de l'adversaire n'est lu qu'ici, sans intérêt pour la réponse.
 		await progressOnboardingForMatch(userId, level, "ranked", winnerId === userId);
@@ -165,8 +197,61 @@ const getMyStats = async (req: Request, res: Response): Promise<void> => {
 			return;
 		}
 
-		const stats = await getStats(userId);
+		// hidden_mmr n'est jamais exposé, même au joueur concerné (comportement
+		// voulu façon MMR caché League of Legends — voir rankedModel.getStats).
+		const { hidden_mmr, ...stats } = await getStats(userId);
 		res.status(200).json(stats);
+	} catch (error) {
+		console.error(error);
+		res.status(500).json({ message: "Server error" });
+	}
+};
+
+// Historique des 20 (par défaut) dernières parties réseau du joueur —
+// consommé par MatchHistoryPanel.gd côté card-game (onglet "Historique" du
+// profil). Solo/IA non couverts (pas de second rapporteur, voir match_history).
+const getMatchHistoryHandler = async (req: Request, res: Response): Promise<void> => {
+	try {
+		const userId = getUserId(req);
+		if (!userId) {
+			res.status(401).json({ message: "Non authentifié" });
+			return;
+		}
+		const limit = Math.min(Number(req.query.limit) || 20, 50);
+		const history = await getMatchHistory(userId, limit);
+		res.status(200).json(history);
+	} catch (error) {
+		console.error(error);
+		res.status(500).json({ message: "Server error" });
+	}
+};
+
+// Même chose que getMatchHistoryHandler mais pour un AUTRE joueur (onglet
+// "Historique" du profil d'un ami, voir GET /api/profile/:userId côté
+// profileController) — restreint aux amis acceptés pour les mêmes raisons
+// que ce profil (expose l'identité d'adversaires tiers).
+const getFriendMatchHistoryHandler = async (req: Request, res: Response): Promise<void> => {
+	try {
+		const viewerId = getUserId(req);
+		if (!viewerId) {
+			res.status(401).json({ message: "Non authentifié" });
+			return;
+		}
+		const targetId = Number(req.params.userId);
+		if (Number.isNaN(targetId)) {
+			res.status(400).json({ message: "Invalid id" });
+			return;
+		}
+		if (targetId !== viewerId) {
+			const friendship = await findFriendship(viewerId, targetId);
+			if (!friendship || friendship.status !== "accepted") {
+				res.status(403).json({ message: "Vous devez être ami avec ce joueur pour voir son historique" });
+				return;
+			}
+		}
+		const limit = Math.min(Number(req.query.limit) || 20, 50);
+		const history = await getMatchHistory(targetId, limit);
+		res.status(200).json(history);
 	} catch (error) {
 		console.error(error);
 		res.status(500).json({ message: "Server error" });
@@ -177,8 +262,10 @@ const getLeaderboardHandler = async (req: Request, res: Response): Promise<void>
 	try {
 		const limit = Math.min(Number(req.query.limit) || 50, 100);
 		const offset = Number(req.query.offset) || 0;
+		const minMmr = req.query.minMmr !== undefined ? Number(req.query.minMmr) : undefined;
+		const maxMmr = req.query.maxMmr !== undefined ? Number(req.query.maxMmr) : undefined;
 
-		const leaderboard = await getLeaderboard(limit, offset);
+		const leaderboard = await getLeaderboard(limit, offset, minMmr, maxMmr);
 		res.status(200).json(leaderboard);
 	} catch (error) {
 		console.error(error);
@@ -186,4 +273,72 @@ const getLeaderboardHandler = async (req: Request, res: Response): Promise<void>
 	}
 };
 
-export { reportMatch, getMyStats, getLeaderboardHandler };
+// Position du joueur authentifié dans le classement — utilisé par le client
+// pour sauter directement à sa propre position (voir StatsPanel.gd).
+const getMyLeaderboardPositionHandler = async (req: Request, res: Response): Promise<void> => {
+	try {
+		const userId = getUserId(req);
+		if (!userId) {
+			res.status(401).json({ message: "Non authentifié" });
+			return;
+		}
+		const position = await getMyLeaderboardPosition(userId);
+		if (!position) {
+			res.status(404).json({ message: "Non classé" });
+			return;
+		}
+		res.status(200).json(position);
+	} catch (error) {
+		console.error(error);
+		res.status(500).json({ message: "Server error" });
+	}
+};
+
+const getLeaderboardAroundMeHandler = async (req: Request, res: Response): Promise<void> => {
+	try {
+		const userId = getUserId(req);
+		if (!userId) {
+			res.status(401).json({ message: "Non authentifié" });
+			return;
+		}
+		const limit = Math.min(Number(req.query.limit) || 21, 100);
+		const minMmr = req.query.minMmr !== undefined ? Number(req.query.minMmr) : undefined;
+		const maxMmr = req.query.maxMmr !== undefined ? Number(req.query.maxMmr) : undefined;
+
+		const page = await getLeaderboardAroundUser(userId, limit, minMmr, maxMmr);
+		if (!page) {
+			res.status(404).json({ message: "Non classé" });
+			return;
+		}
+		res.status(200).json(page);
+	} catch (error) {
+		console.error(error);
+		res.status(500).json({ message: "Server error" });
+	}
+};
+
+const searchLeaderboardHandler = async (req: Request, res: Response): Promise<void> => {
+	try {
+		const query = String(req.query.q ?? "").trim().slice(0, 50);
+		if (!query) {
+			res.status(200).json([]);
+			return;
+		}
+		const results = await searchLeaderboard(query);
+		res.status(200).json(results);
+	} catch (error) {
+		console.error(error);
+		res.status(500).json({ message: "Server error" });
+	}
+};
+
+export {
+	reportMatch,
+	getMyStats,
+	getMatchHistoryHandler,
+	getFriendMatchHistoryHandler,
+	getLeaderboardHandler,
+	getMyLeaderboardPositionHandler,
+	getLeaderboardAroundMeHandler,
+	searchLeaderboardHandler,
+};

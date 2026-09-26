@@ -18,11 +18,23 @@ const WINDOW_MAX_MMR = 500;
 // cette valeur n'a donc pas besoin d'être plus courte que ça.
 const TICKET_EXPIRY_SECONDS = 300;
 
+// Pondération de l'ancienneté d'un ticket, EXPRIMÉE EN POINTS DE MMR (voir
+// pairingScore). À 5/s plafonné à 300, un candidat qui patiente depuis 20s
+// « vaut » 100 points d'imprécision de MMR : il passe donc devant un adversaire
+// plus proche en MMR mais qui vient d'arriver. Le plafond évite qu'un ticket
+// très ancien ne rende le MMR totalement indifférent — et la fenêtre
+// (windowFor) reste de toute façon la contrainte dure.
+const WAIT_BONUS_MMR_PER_SECOND = 5;
+const WAIT_BONUS_MAX_MMR = 300;
+
+type QueueMode = "ranked" | "normal";
+
 interface TicketRow extends RowDataPacket {
 	id: number;
 	ticket_id: string;
 	user_id: number;
 	mmr: number;
+	mode: QueueMode;
 	status: "waiting" | "matched" | "cancelled" | "expired";
 	opponent_id: number | null;
 	role: "host" | "guest" | null;
@@ -33,7 +45,7 @@ interface TicketRow extends RowDataPacket {
 }
 
 type QueueStatusResult =
-	| { status: "waiting" }
+	| { status: "waiting"; mmr: number; window: number; elapsed_seconds: number }
 	| {
 			status: "matched";
 			role: "host" | "guest";
@@ -50,31 +62,65 @@ const elapsedSeconds = (createdAt: string): number => (Date.now() - new Date(cre
 const windowFor = (elapsed: number): number =>
 	Math.min(WINDOW_BASE_MMR + Math.floor(elapsed / WINDOW_STEP_SECONDS) * WINDOW_STEP_MMR, WINDOW_MAX_MMR);
 
-// Cherche un adversaire compatible parmi les autres tickets en attente,
-// verrouillés FOR UPDATE pour qu'un même adversaire ne puisse pas être
-// apparié deux fois par deux requêtes concurrentes (join + poll d'un tiers en
-// même temps). La fenêtre retenue est la plus large des deux côtés : un
-// joueur qui attend depuis longtemps élargit sa propre fenêtre, suffisant pour
-// matcher même si l'autre vient d'arriver.
+// Départage les candidats DÉJÀ éligibles (dans la fenêtre) en combinant
+// proximité de MMR et ancienneté du ticket — le score le plus BAS gagne :
+//
+//     score = |Δmmr| − BONUS × attente_du_candidat
+//
+// Sans ce score, findOpponent retenait simplement le premier candidat éligible
+// dans l'ordre d'arrivée, donc le ticket le PLUS ANCIEN et jamais le MMR le
+// plus proche : avec plusieurs joueurs en file, un adversaire à 90 points
+// d'écart passait devant un à 20 points s'il attendait depuis plus longtemps.
+// Les deux critères sont désormais combinés (demande utilisateur) : la fenêtre
+// garantit qu'on finit toujours par matcher, le score choisit qui parmi les
+// éligibles.
+const pairingScore = (ticket: TicketRow, candidate: TicketRow): number =>
+	Math.abs(candidate.mmr - ticket.mmr) -
+	Math.min(elapsedSeconds(candidate.created_at) * WAIT_BONUS_MMR_PER_SECOND, WAIT_BONUS_MAX_MMR);
+
+// Cherche un adversaire compatible parmi les autres tickets en attente DU
+// MÊME MODE (jamais un ticket Normal apparié à un ticket Classé — le MMR
+// n'a pas le même sens des deux côtés, voir joinQueue), verrouillés FOR
+// UPDATE pour qu'un même adversaire ne puisse pas être apparié deux fois par
+// deux requêtes concurrentes (join + poll d'un tiers en même temps). La
+// fenêtre retenue est la plus large des deux côtés : un joueur qui attend
+// depuis longtemps élargit sa propre fenêtre, suffisant pour matcher même si
+// l'autre vient d'arriver. Parmi TOUS les candidats éligibles, on retient le
+// meilleur au sens de pairingScore (MMR le plus proche, corrigé de
+// l'ancienneté) — et non plus le premier venu.
 const findOpponent = async (connection: PoolConnection, ticket: TicketRow): Promise<TicketRow | null> => {
 	const [candidates] = await connection.query<TicketRow[]>(
-		"SELECT * FROM matchmaking_tickets WHERE status = 'waiting' AND user_id != ? ORDER BY created_at ASC FOR UPDATE",
-		[ticket.user_id],
+		"SELECT * FROM matchmaking_tickets WHERE status = 'waiting' AND mode = ? AND user_id != ? ORDER BY created_at ASC FOR UPDATE",
+		[ticket.mode, ticket.user_id],
 	);
 	const myWindow = windowFor(elapsedSeconds(ticket.created_at));
+	let best: TicketRow | null = null;
+	let bestScore = Number.POSITIVE_INFINITY;
 	for (const candidate of candidates) {
 		const window = Math.max(myWindow, windowFor(elapsedSeconds(candidate.created_at)));
-		if (Math.abs(candidate.mmr - ticket.mmr) <= window) return candidate;
+		// La fenêtre reste une contrainte DURE : un adversaire hors fenêtre n'est
+		// jamais rattrapé par son ancienneté.
+		if (Math.abs(candidate.mmr - ticket.mmr) > window) continue;
+		const score = pairingScore(ticket, candidate);
+		// Strictement inférieur : à égalité de score, le candidat le plus ancien
+		// gagne, les candidats arrivant triés par created_at ASC.
+		if (score < bestScore) {
+			best = candidate;
+			bestScore = score;
+		}
 	}
-	return null;
+	return best;
 };
 
-// Désigne l'hôte de façon déterministe (le plus petit user_id) et marque les
-// deux tickets matched en une fois — appelé sous transaction avec les deux
-// lignes déjà verrouillées (l'une par le SELECT ... FOR UPDATE de l'appelant,
-// l'autre par le FOR UPDATE de findOpponent).
+// Désigne l'hôte au hasard (50/50) et marque les deux tickets matched en une
+// fois — appelé sous transaction avec les deux lignes déjà verrouillées (l'une
+// par le SELECT ... FOR UPDATE de l'appelant, l'autre par le FOR UPDATE de
+// findOpponent). Autrefois déterministe (le plus petit user_id) : deux
+// joueurs qui se retrouvent régulièrement (ex. entre amis) tombaient TOUJOURS
+// sur le même hôte, l'autre ne pouvant jamais héberger — corrigé sur demande
+// explicite (voir aussi card-game CLAUDE.md, section matchmaking).
 const pairTickets = async (connection: PoolConnection, ticket: TicketRow, opponent: TicketRow): Promise<void> => {
-	const hostId = Math.min(ticket.user_id, opponent.user_id);
+	const hostId = Math.random() < 0.5 ? ticket.user_id : opponent.user_id;
 	// matchId/jeton émis une seule fois ici, à l'appariement réel côté serveur
 	// — voir helper/matchSessionToken.ts et TODO.md P9. Les deux tickets
 	// reçoivent le même matchId/jeton : chaque joueur le relit à son prochain
@@ -91,24 +137,33 @@ const pairTickets = async (connection: PoolConnection, ticket: TicketRow, oppone
 	);
 };
 
-// Rejoint la file : un seul ticket actif par joueur (UNIQUE KEY user_id),
-// un second appel remplace le précédent plutôt que de créer un doublon.
-// Tente immédiatement un appariement plutôt que d'attendre le prochain poll,
-// pour matcher tout de suite si un adversaire compatible attend déjà.
-const joinQueue = async (userId: number): Promise<string> => {
+// Rejoint la file : un seul ticket actif par joueur tous modes confondus
+// (UNIQUE KEY user_id — un joueur ne peut de toute façon chercher qu'une
+// seule partie à la fois), un second appel remplace le précédent plutôt que
+// de créer un doublon. Tente immédiatement un appariement plutôt que
+// d'attendre le prochain poll, pour matcher tout de suite si un adversaire
+// compatible attend déjà.
+// mode "ranked" : apparié sur le MMR public affiché (ranked_stats.mmr),
+// gagné/perdu uniquement par ce mode (voir rankedModel.confirmMatch).
+// mode "normal" : apparié sur un MMR caché (ranked_stats.hidden_mmr), jamais
+// affiché ni modifié par le classé — permet de matcher des adversaires de
+// niveau similaire en partie Normal sans toucher au classement public
+// (comportement demandé façon MMR caché League of Legends).
+const joinQueue = async (userId: number, mode: QueueMode): Promise<string> => {
 	const stats = await getStats(userId);
+	const matchmakingMmr = mode === "normal" ? stats.hidden_mmr : stats.mmr;
 	const ticketId = randomUUID();
 	const connection = await db.getConnection();
 	try {
 		await connection.beginTransaction();
 		await connection.query(
-			`INSERT INTO matchmaking_tickets (ticket_id, user_id, mmr, status)
-			 VALUES (?, ?, ?, 'waiting')
+			`INSERT INTO matchmaking_tickets (ticket_id, user_id, mmr, mode, status)
+			 VALUES (?, ?, ?, ?, 'waiting')
 			 ON DUPLICATE KEY UPDATE
-			   ticket_id = VALUES(ticket_id), mmr = VALUES(mmr), status = 'waiting',
+			   ticket_id = VALUES(ticket_id), mmr = VALUES(mmr), mode = VALUES(mode), status = 'waiting',
 			   opponent_id = NULL, role = NULL, steam_lobby_id = NULL,
 			   match_id = NULL, match_session_token = NULL, created_at = CURRENT_TIMESTAMP`,
-			[ticketId, userId, stats.mmr],
+			[ticketId, userId, matchmakingMmr, mode],
 		);
 		const [rows] = await connection.query<TicketRow[]>(
 			"SELECT * FROM matchmaking_tickets WHERE user_id = ? FOR UPDATE",
@@ -140,7 +195,8 @@ const toStatusResult = (ticket: TicketRow): QueueStatusResult => {
 	}
 	if (ticket.status === "cancelled") return { status: "cancelled" };
 	if (ticket.status === "expired") return { status: "expired" };
-	return { status: "waiting" };
+	const elapsed = elapsedSeconds(ticket.created_at);
+	return { status: "waiting", mmr: ticket.mmr, window: windowFor(elapsed), elapsed_seconds: Math.floor(elapsed) };
 };
 
 // Interroge l'état d'un ticket (poll client toutes les 2s). Retente un
@@ -181,7 +237,7 @@ const getQueueStatus = async (userId: number, ticketId: string): Promise<QueueSt
 				return toStatusResult(refreshed[0]);
 			}
 			await connection.commit();
-			return { status: "waiting" };
+			return toStatusResult(ticket);
 		}
 
 		await connection.commit();
@@ -241,3 +297,4 @@ const cancelQueue = async (userId: number, ticketId: string): Promise<void> => {
 };
 
 export { joinQueue, getQueueStatus, reportLobby, cancelQueue };
+export type { QueueMode };

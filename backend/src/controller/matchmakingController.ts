@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 
 import { joinQueue, getQueueStatus, reportLobby, cancelQueue } from "../model/matchmakingModel";
+import type { QueueMode } from "../model/matchmakingModel";
 import { getUserId } from "../helper/requestUser";
 
 const joinQueueHandler = async (req: Request, res: Response): Promise<void> => {
@@ -11,7 +12,14 @@ const joinQueueHandler = async (req: Request, res: Response): Promise<void> => {
 			return;
 		}
 
-		const ticketId = await joinQueue(userId);
+		// "ranked" par défaut : tolère un client pas encore mis à jour (avant
+		// l'ajout du MMR caché Normal) qui n'enverrait pas ce champ — préserve
+		// le comportement classé existant sans rien casser en prod le temps du
+		// déploiement.
+		const rawMode = (req.body as { mode?: string })?.mode;
+		const mode: QueueMode = rawMode === "normal" ? "normal" : "ranked";
+
+		const ticketId = await joinQueue(userId, mode);
 		res.status(200).json({ ticket_id: ticketId });
 	} catch (error) {
 		console.error(error);

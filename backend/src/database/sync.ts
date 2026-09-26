@@ -28,6 +28,8 @@ const USERS_COLUMNS_TO_ENSURE: { name: string; ddl: string }[] = [
 	{ name: "free_packs", ddl: "free_packs INT NOT NULL DEFAULT 0" },
 	{ name: "level", ddl: "level INT NOT NULL DEFAULT 1" },
 	{ name: "xp", ddl: "xp INT NOT NULL DEFAULT 0" },
+	{ name: "last_heartbeat_at", ddl: "last_heartbeat_at TIMESTAMP NULL DEFAULT NULL" },
+	{ name: "in_game", ddl: "in_game BOOLEAN NOT NULL DEFAULT FALSE" },
 ];
 
 const ensureUsersColumns = async (connection: mysql.Connection): Promise<void> => {
@@ -68,6 +70,7 @@ const ensureSoloStatsColumns = async (connection: mysql.Connection): Promise<voi
 // schema.sql) — même pattern que ensureSoloStatsColumns.
 const RANKED_STATS_COLUMNS_TO_ENSURE: { name: string; ddl: string }[] = [
 	{ name: "win_streak", ddl: "win_streak INT NOT NULL DEFAULT 0" },
+	{ name: "hidden_mmr", ddl: "hidden_mmr INT NOT NULL DEFAULT 0" },
 ];
 
 const ensureRankedStatsColumns = async (connection: mysql.Connection): Promise<void> => {
@@ -121,6 +124,8 @@ const dropUsernameUniqueIndex = async (connection: mysql.Connection): Promise<vo
 const MATCH_REPORTS_COLUMNS_TO_ENSURE: { name: string; ddl: string }[] = [
 	{ name: "cards_played_by_race", ddl: "cards_played_by_race JSON NULL" },
 	{ name: "deck_races", ddl: "deck_races JSON NULL" },
+	{ name: "cards_played", ddl: "cards_played JSON NULL" },
+	{ name: "mode", ddl: "mode VARCHAR(10) NOT NULL DEFAULT 'ranked'" },
 ];
 
 const ensureMatchReportsColumns = async (connection: mysql.Connection): Promise<void> => {
@@ -143,6 +148,9 @@ const ensureMatchReportsColumns = async (connection: mysql.Connection): Promise<
 const MATCH_HISTORY_COLUMNS_TO_ENSURE: { name: string; ddl: string }[] = [
 	{ name: "xp_awarded_player1", ddl: "xp_awarded_player1 INT NOT NULL DEFAULT 0" },
 	{ name: "xp_awarded_player2", ddl: "xp_awarded_player2 INT NOT NULL DEFAULT 0" },
+	{ name: "mmr_change_player1", ddl: "mmr_change_player1 INT NOT NULL DEFAULT 0" },
+	{ name: "mmr_change_player2", ddl: "mmr_change_player2 INT NOT NULL DEFAULT 0" },
+	{ name: "duration_sec", ddl: "duration_sec INT NOT NULL DEFAULT 0" },
 ];
 
 const ensureMatchHistoryColumns = async (connection: mysql.Connection): Promise<void> => {
@@ -165,6 +173,10 @@ const ensureMatchHistoryColumns = async (connection: mysql.Connection): Promise<
 const MATCHMAKING_TICKETS_COLUMNS_TO_ENSURE: { name: string; ddl: string }[] = [
 	{ name: "match_id", ddl: "match_id VARCHAR(36) NULL" },
 	{ name: "match_session_token", ddl: "match_session_token TEXT NULL" },
+	// 'ranked' | 'normal' — voir matchmakingModel.ts/schema.sql. Défaut 'ranked'
+	// pour que les tickets déjà en base (toujours du classé jusqu'ici) restent
+	// cohérents sans backfill.
+	{ name: "mode", ddl: "mode VARCHAR(10) NOT NULL DEFAULT 'ranked'" },
 ];
 
 const ensureMatchmakingTicketsColumns = async (connection: mysql.Connection): Promise<void> => {

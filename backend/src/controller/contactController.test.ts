@@ -4,12 +4,17 @@ import type { Request, Response } from "express";
 vi.mock("../helper/mailHelper", () => ({
 	sendMail: vi.fn(),
 }));
+vi.mock("../helper/discordHelper", () => ({
+	sendDiscordWebhook: vi.fn(),
+}));
 
 import { sendMail } from "../helper/mailHelper";
+import { sendDiscordWebhook } from "../helper/discordHelper";
 import { submitContact } from "./contactController";
 
 const mocked = {
 	sendMail: sendMail as ReturnType<typeof vi.fn>,
+	sendDiscordWebhook: sendDiscordWebhook as ReturnType<typeof vi.fn>,
 };
 
 const mockRes = (): Response => {
@@ -23,14 +28,14 @@ const mockRes = (): Response => {
 const validBody = {
 	name: "Alice",
 	email: "alice@example.com",
-	category: "bug",
+	category: "question",
 	message: "Le jeu crash au mulligan.",
 };
 
 describe("submitContact", () => {
 	beforeEach(() => vi.resetAllMocks());
 
-	it("sends the mail and returns 200 on a valid submission", async () => {
+	it("sends the mail and returns 200 on a valid submission (non-bug category)", async () => {
 		const req = { body: validBody } as Request;
 		const res = mockRes();
 
@@ -39,6 +44,25 @@ describe("submitContact", () => {
 		expect(mocked.sendMail).toHaveBeenCalledWith(
 			expect.objectContaining({ replyTo: "alice@example.com" }),
 		);
+		expect(mocked.sendDiscordWebhook).not.toHaveBeenCalled();
+		expect(res.sendStatus).toHaveBeenCalledWith(200);
+	});
+
+	it("sends bug reports to Discord instead of mail", async () => {
+		const req = { body: { ...validBody, category: "bug" } } as Request;
+		const res = mockRes();
+
+		await submitContact(req, res);
+
+		expect(mocked.sendDiscordWebhook).toHaveBeenCalledWith(
+			expect.objectContaining({
+				fields: expect.arrayContaining([
+					expect.objectContaining({ name: "Message", value: validBody.message }),
+				]),
+			}),
+			expect.stringContaining("Alice"),
+		);
+		expect(mocked.sendMail).not.toHaveBeenCalled();
 		expect(res.sendStatus).toHaveBeenCalledWith(200);
 	});
 
@@ -50,6 +74,7 @@ describe("submitContact", () => {
 
 		expect(res.status).toHaveBeenCalledWith(400);
 		expect(mocked.sendMail).not.toHaveBeenCalled();
+		expect(mocked.sendDiscordWebhook).not.toHaveBeenCalled();
 	});
 
 	it("rejects an invalid email", async () => {
@@ -72,7 +97,7 @@ describe("submitContact", () => {
 		expect(mocked.sendMail).not.toHaveBeenCalled();
 	});
 
-	it("silently accepts (without sending mail) when the honeypot field is filled", async () => {
+	it("silently accepts (without sending anything) when the honeypot field is filled", async () => {
 		const req = { body: { ...validBody, website: "https://spam.example" } } as Request;
 		const res = mockRes();
 
@@ -80,6 +105,7 @@ describe("submitContact", () => {
 
 		expect(res.sendStatus).toHaveBeenCalledWith(200);
 		expect(mocked.sendMail).not.toHaveBeenCalled();
+		expect(mocked.sendDiscordWebhook).not.toHaveBeenCalled();
 	});
 
 	it("includes the portfolio link in the mail body when provided", async () => {

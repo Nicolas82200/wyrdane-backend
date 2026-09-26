@@ -58,6 +58,10 @@ services:
       SMTP_PASS: ${SMTP_PASS}
       SMTP_FROM: ${SMTP_FROM}
       CONTACT_EMAIL_TO: ${CONTACT_EMAIL_TO}
+      DISCORD_CRASH_WEBHOOK_URL: ${DISCORD_CRASH_WEBHOOK_URL}
+      # Diagnostic TEMPORAIRE (voir router/debugRouter.ts) — à retirer avec la
+      # route une fois le diagnostic terminé.
+      DEBUG_MATCHMAKING_KEY: ${DEBUG_MATCHMAKING_KEY}
     ports:
       # Exposé uniquement sur localhost -> Nginx (natif) fait le proxy vers ici
       - "127.0.0.1:3000:3000"

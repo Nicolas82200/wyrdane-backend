@@ -68,7 +68,8 @@ CREATE TABLE IF NOT EXISTS deck_cards (
 
 CREATE TABLE IF NOT EXISTS ranked_stats (
   user_id INT PRIMARY KEY,
-  mmr INT NOT NULL DEFAULT 1000,
+  mmr INT NOT NULL DEFAULT 0,
+  hidden_mmr INT NOT NULL DEFAULT 0,
   wins INT NOT NULL DEFAULT 0,
   losses INT NOT NULL DEFAULT 0,
   win_streak INT NOT NULL DEFAULT 0,
@@ -81,6 +82,7 @@ CREATE TABLE IF NOT EXISTS matchmaking_tickets (
   ticket_id VARCHAR(36) NOT NULL,
   user_id INT NOT NULL,
   mmr INT NOT NULL,
+  mode VARCHAR(10) NOT NULL DEFAULT 'ranked',
   status VARCHAR(20) NOT NULL DEFAULT 'waiting',
   opponent_id INT NULL,
   role VARCHAR(10) NULL,
@@ -109,6 +111,17 @@ CREATE TABLE IF NOT EXISTS login_rewards (
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS level_rewards (
+  user_id INT NOT NULL,
+  level INT NOT NULL,
+  type ENUM('card', 'pack', 'gold') NOT NULL,
+  gold INT NOT NULL DEFAULT 0,
+  granted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  claimed_at TIMESTAMP NULL DEFAULT NULL,
+  PRIMARY KEY (user_id, level),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS match_history (
   id INT AUTO_INCREMENT PRIMARY KEY,
   client_match_id VARCHAR(100) NOT NULL UNIQUE,
@@ -130,14 +143,29 @@ CREATE TABLE IF NOT EXISTS match_reports (
   reporter_id INT NOT NULL,
   opponent_id INT NOT NULL,
   winner_id INT NOT NULL,
+  mode VARCHAR(10) NOT NULL DEFAULT 'ranked',
   season INT NOT NULL,
   cards_played_by_race JSON NULL,
   deck_races JSON NULL,
+  cards_played JSON NULL,
   reported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (reporter_id) REFERENCES users(id) ON DELETE CASCADE,
   FOREIGN KEY (opponent_id) REFERENCES users(id) ON DELETE CASCADE,
   FOREIGN KEY (winner_id) REFERENCES users(id) ON DELETE CASCADE,
   UNIQUE KEY unique_match_reporter (client_match_id, reporter_id)
+);
+
+CREATE TABLE IF NOT EXISTS card_play_stats (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  card_name VARCHAR(150) NOT NULL,
+  client_match_id VARCHAR(100) NOT NULL,
+  user_id INT NOT NULL,
+  won BOOLEAN NOT NULL,
+  season INT NOT NULL,
+  played_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  UNIQUE KEY unique_card_match_user (card_name, client_match_id, user_id),
+  INDEX idx_card_play_stats_card_name (card_name)
 );
 
 CREATE TABLE IF NOT EXISTS daily_quests (
@@ -168,6 +196,23 @@ CREATE TABLE IF NOT EXISTS weekly_quests (
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
   UNIQUE KEY unique_user_quest_week_slot (user_id, week_start, slot)
+);
+
+CREATE TABLE IF NOT EXISTS monthly_quests (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  user_id INT NOT NULL,
+  month_start DATE NOT NULL,
+  slot TINYINT NOT NULL,
+  quest_code VARCHAR(30) NOT NULL,
+  progress INT NOT NULL DEFAULT 0,
+  target INT NOT NULL,
+  reward_currency INT NOT NULL DEFAULT 0,
+  reward_pack INT NOT NULL DEFAULT 0,
+  last_progress_date DATE NULL DEFAULT NULL,
+  claimed_at TIMESTAMP NULL DEFAULT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  UNIQUE KEY unique_user_quest_month_slot (user_id, month_start, slot)
 );
 
 CREATE TABLE IF NOT EXISTS unique_quests (
@@ -276,4 +321,46 @@ CREATE TABLE IF NOT EXISTS wishlist_stats (
   count INT NOT NULL DEFAULT 0,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS friendships (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  requester_id INT NOT NULL,
+  addressee_id INT NOT NULL,
+  status VARCHAR(10) NOT NULL DEFAULT 'pending',
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  responded_at TIMESTAMP NULL DEFAULT NULL,
+  FOREIGN KEY (requester_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (addressee_id) REFERENCES users(id) ON DELETE CASCADE,
+  UNIQUE KEY unique_friend_pair (requester_id, addressee_id),
+  INDEX idx_friendships_addressee_status (addressee_id, status),
+  INDEX idx_friendships_requester_status (requester_id, status)
+);
+
+CREATE TABLE IF NOT EXISTS messages (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  sender_id INT NOT NULL,
+  recipient_id INT NOT NULL,
+  body VARCHAR(500) NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  read_at TIMESTAMP NULL DEFAULT NULL,
+  FOREIGN KEY (sender_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (recipient_id) REFERENCES users(id) ON DELETE CASCADE,
+  INDEX idx_messages_conversation (sender_id, recipient_id, created_at),
+  INDEX idx_messages_recipient_unread (recipient_id, read_at)
+);
+
+CREATE TABLE IF NOT EXISTS game_invites (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  sender_id INT NOT NULL,
+  recipient_id INT NOT NULL,
+  steam_lobby_id BIGINT NOT NULL,
+  status VARCHAR(10) NOT NULL DEFAULT 'pending',
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  responded_at TIMESTAMP NULL DEFAULT NULL,
+  FOREIGN KEY (sender_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (recipient_id) REFERENCES users(id) ON DELETE CASCADE,
+  INDEX idx_game_invites_recipient_status (recipient_id, status),
+  INDEX idx_game_invites_sender_status (sender_id, status)
+);
+
 INSERT IGNORE INTO wishlist_stats (id, count) VALUES (1, 0);

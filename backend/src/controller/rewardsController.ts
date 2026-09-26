@@ -4,6 +4,7 @@ import { getBalance } from "../model/currencyModel";
 import { incrementResult } from "../model/soloStatsModel";
 import { progressForMatch } from "../model/questModel";
 import { progressForMatch as progressWeeklyForMatch } from "../model/weeklyQuestModel";
+import { progressForMatch as progressMonthlyForMatch } from "../model/monthlyQuestModel";
 import { progressForMatch as progressUniqueForMatch } from "../model/uniqueQuestModel";
 import { progressForMatch as progressOnboardingForMatch } from "../model/onboardingQuestModel";
 import { getLevel } from "../model/levelModel";
@@ -40,6 +41,7 @@ const reportSoloMatch = async (req: Request, res: Response): Promise<void> => {
 		const winStreak = await incrementResult(userId, won);
 		await progressForMatch(userId, "solo", won, { cardsPlayedByRace, deckRaces });
 		await progressWeeklyForMatch(userId, "solo", won, { cardsPlayedByRace, deckRaces });
+		await progressMonthlyForMatch(userId, "solo", won, { cardsPlayedByRace, deckRaces });
 		await progressUniqueForMatch(userId, "solo", won, { deckRaces });
 		const { level } = await getLevel(userId);
 		await progressOnboardingForMatch(userId, level, "solo", won);

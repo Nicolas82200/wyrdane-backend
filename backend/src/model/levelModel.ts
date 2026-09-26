@@ -1,4 +1,4 @@
-import type { RowDataPacket } from "mysql2";
+import type { ResultSetHeader, RowDataPacket } from "mysql2";
 import type { PoolConnection } from "mysql2/promise";
 import db from "./db";
 import { credit, creditFreePacks } from "./currencyModel";
@@ -84,6 +84,12 @@ interface LevelRow extends RowDataPacket {
 	xp: number;
 }
 
+// Plafond du catalogue de récompenses parcourable dans la popup client (voir
+// getRewardCatalog) : au moins ce niveau, étendu dynamiquement pour toujours
+// couvrir un peu au-delà du niveau réel du joueur (CATALOG_LOOKAHEAD).
+const CATALOG_MIN_LEVEL = 60;
+const CATALOG_LOOKAHEAD = 10;
+
 const rewardKindForLevel = (level: number): { kind: LevelRewardKind; rarity?: string } => {
 	if (level % 25 === 0) return { kind: "pack" };
 	if (level % 5 === 0) return { kind: "card", rarity: CARD_RARITY_BY_LEVEL_MOD_20[level % 20] ?? "Commune" };
@@ -108,41 +114,61 @@ const fetchRandomCardByRarity = async (
 // carte/pack créditent en plus un bonus d'or fixe (GOLD_BONUS_PER_*_LEVEL),
 // cumulé avec un éventuel dust — `gold` sur le reward reflète toujours le
 // montant total réellement crédité, pas seulement le bonus.
+// Journalise dans level_rewards la récompense déjà octroyée (aucun nouveau
+// crédit ici) — permet à la popup client de retrouver plus tard ce qui a été
+// obtenu à ce niveau et si le joueur l'a "vu" (claimed_at, voir claimRewards).
+const logLevelReward = async (
+	userId: number,
+	reward: LevelReward,
+	connection: PoolConnection,
+): Promise<void> => {
+	await connection.query("INSERT INTO level_rewards (user_id, level, type, gold) VALUES (?, ?, ?, ?)", [
+		userId,
+		reward.level,
+		reward.type,
+		reward.gold ?? 0,
+	]);
+};
+
 const grantLevelReward = async (
 	userId: number,
 	level: number,
 	connection: PoolConnection,
 ): Promise<LevelReward> => {
 	const { kind, rarity } = rewardKindForLevel(level);
+	let reward: LevelReward;
 
 	if (kind === "pack") {
 		await creditFreePacks(userId, 1, connection);
 		await credit(userId, GOLD_BONUS_PER_PACK_LEVEL, "level_reward_gold", `level_${level}`, connection);
-		return { level, type: "pack", gold: GOLD_BONUS_PER_PACK_LEVEL };
-	}
-
-	if (kind === "card") {
+		reward = { level, type: "pack", gold: GOLD_BONUS_PER_PACK_LEVEL };
+	} else if (kind === "card") {
 		const card = await fetchRandomCardByRarity(rarity!, connection);
 		if (!card) {
 			// Repli défensif : aucune carte de cette rareté en base — le bonus
 			// du palier remplace alors entièrement la récompense.
 			await credit(userId, GOLD_BONUS_PER_CARD_LEVEL, "level_reward_gold", `level_${level}`, connection);
-			return { level, type: "gold", gold: GOLD_BONUS_PER_CARD_LEVEL };
+			reward = { level, type: "gold", gold: GOLD_BONUS_PER_CARD_LEVEL };
+		} else {
+			const alreadyOwned = await getOwnedQuantity(userId, card.id, connection);
+			if (alreadyOwned >= MAX_COPIES_PER_CARD) {
+				const gold = (DUST_VALUE_BY_RARITY[card.rarity] ?? 0) + GOLD_BONUS_PER_CARD_LEVEL;
+				await credit(userId, gold, "level_reward_dust", `level_${level}`, connection);
+				reward = { level, type: "card", card, dusted: true, gold };
+			} else {
+				await grantCard(userId, card.id, 1, connection);
+				await credit(userId, GOLD_BONUS_PER_CARD_LEVEL, "level_reward_gold", `level_${level}`, connection);
+				reward = { level, type: "card", card, dusted: false, gold: GOLD_BONUS_PER_CARD_LEVEL };
+			}
 		}
-		const alreadyOwned = await getOwnedQuantity(userId, card.id, connection);
-		if (alreadyOwned >= MAX_COPIES_PER_CARD) {
-			const gold = (DUST_VALUE_BY_RARITY[card.rarity] ?? 0) + GOLD_BONUS_PER_CARD_LEVEL;
-			await credit(userId, gold, "level_reward_dust", `level_${level}`, connection);
-			return { level, type: "card", card, dusted: true, gold };
-		}
-		await grantCard(userId, card.id, 1, connection);
-		await credit(userId, GOLD_BONUS_PER_CARD_LEVEL, "level_reward_gold", `level_${level}`, connection);
-		return { level, type: "card", card, dusted: false, gold: GOLD_BONUS_PER_CARD_LEVEL };
+	} else {
+		const gold = goldRewardForLevel(level);
+		await credit(userId, gold, "level_reward_gold", `level_${level}`, connection);
+		reward = { level, type: "gold", gold };
 	}
 
-	const gold = goldRewardForLevel(level);
-	await credit(userId, gold, "level_reward_gold", `level_${level}`, connection);
-	return { level, type: "gold", gold };
+	await logLevelReward(userId, reward, connection);
+	return reward;
 };
 
 const getLevel = async (userId: number): Promise<{ level: number; xp: number; xpToNext: number }> => {
@@ -209,7 +235,84 @@ const addXp = async (userId: number, amount: number): Promise<XpResult> => {
 	}
 };
 
-export type { LevelReward };
+interface LevelRewardCatalogEntry {
+	level: number;
+	kind: LevelRewardKind;
+	rarity?: string;
+	gold?: number;
+}
+
+// Catalogue déterministe (aucune requête DB) des récompenses par niveau,
+// consommé par la popup client pour afficher aussi les niveaux pas encore
+// atteints. Couvre toujours au moins CATALOG_MIN_LEVEL, étendu pour dépasser
+// un peu le niveau réel du joueur (CATALOG_LOOKAHEAD) plutôt que de s'arrêter
+// pile dessus.
+const getRewardCatalog = (currentLevel: number): LevelRewardCatalogEntry[] => {
+	const maxLevel = Math.max(CATALOG_MIN_LEVEL, currentLevel + CATALOG_LOOKAHEAD);
+	const entries: LevelRewardCatalogEntry[] = [];
+	for (let level = 2; level <= maxLevel; level++) {
+		const { kind, rarity } = rewardKindForLevel(level);
+		entries.push(kind === "gold" ? { level, kind, gold: goldRewardForLevel(level) } : { level, kind, rarity });
+	}
+	return entries;
+};
+
+interface UserLevelRewardRow extends RowDataPacket {
+	level: number;
+	type: LevelRewardKind;
+	gold: number;
+	claimed_at: string | null;
+}
+
+interface UserLevelReward {
+	level: number;
+	type: LevelRewardKind;
+	gold: number;
+	claimed: boolean;
+}
+
+// Récompenses réellement journalisées pour ce joueur (voir logLevelReward) —
+// un niveau atteint avant l'introduction de cette table (2026-09) n'y
+// apparaît simplement pas ; le contrôleur le traite alors comme acquis sans
+// rien à réclamer (voir levelController.getMyLevelRewards).
+const getUserRewards = async (userId: number): Promise<UserLevelReward[]> => {
+	const [rows] = await db.query<UserLevelRewardRow[]>(
+		"SELECT level, type, gold, claimed_at FROM level_rewards WHERE user_id = ? ORDER BY level ASC",
+		[userId],
+	);
+	return rows.map((row) => ({
+		level: row.level,
+		type: row.type,
+		gold: row.gold,
+		claimed: row.claimed_at !== null,
+	}));
+};
+
+// Marque comme "vues" les récompenses des niveaux demandés (bouton
+// "récupérer" ou "tout récupérer" côté client) — accusé de réception
+// seulement, l'octroi réel a déjà eu lieu dans grantLevelReward. Ignore
+// silencieusement les niveaux invalides/déjà réclamés/pas encore atteints.
+const claimRewards = async (userId: number, levels: number[]): Promise<number[]> => {
+	const validLevels = levels.filter((level) => Number.isInteger(level) && level > 1);
+	if (validLevels.length === 0) return [];
+
+	const [result] = await db.query<ResultSetHeader>(
+		`UPDATE level_rewards SET claimed_at = NOW()
+		 WHERE user_id = ? AND claimed_at IS NULL AND level IN (${validLevels.map(() => "?").join(",")})`,
+		[userId, ...validLevels],
+	);
+	if (result.affectedRows === 0) return [];
+
+	const [rows] = await db.query<RowDataPacket[]>(
+		`SELECT level FROM level_rewards WHERE user_id = ? AND claimed_at IS NOT NULL AND level IN (${validLevels
+			.map(() => "?")
+			.join(",")})`,
+		[userId, ...validLevels],
+	);
+	return rows.map((row) => row.level as number);
+};
+
+export type { LevelReward, LevelRewardCatalogEntry, UserLevelReward };
 export {
 	XP_WIN_NETWORK,
 	XP_LOSS_NETWORK,
@@ -218,4 +321,7 @@ export {
 	getLevel,
 	applyXp,
 	addXp,
+	getRewardCatalog,
+	getUserRewards,
+	claimRewards,
 };

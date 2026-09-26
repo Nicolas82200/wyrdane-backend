@@ -2,7 +2,8 @@ import { Request, Response } from "express";
 
 import { findUsername } from "../model/reportsModel";
 import { getUserId } from "../helper/requestUser";
-import { sendMail } from "../helper/mailHelper";
+import { sendDiscordWebhook } from "../helper/discordHelper";
+import type { DiscordEmbedField } from "../helper/discordHelper";
 
 const TYPE_LABELS: Record<string, string> = {
 	bug: "Bug",
@@ -10,6 +11,8 @@ const TYPE_LABELS: Record<string, string> = {
 };
 
 const MAX_DESCRIPTION_LENGTH = 3000;
+// Discord tronque une valeur de field à 1024 caractères.
+const MAX_DESCRIPTION_FIELD_LENGTH = 1000;
 
 type ReportBody = {
 	type?: string;
@@ -18,9 +21,9 @@ type ReportBody = {
 	matchId?: string;
 };
 
-// Pas de table dédiée : comme le formulaire de contact du site (voir
-// contactController), un signalement est simplement transmis par mail à
-// l'équipe — aucun panel de modération n'existe côté backend pour l'instant.
+// Pas de table dédiée : le signalement est transmis directement sur le salon
+// Discord de développement (même webhook que CrashReporter, voir
+// discordHelper) — plus de mail, pour rester dans un seul endroit à suivre.
 const createReport = async (req: Request, res: Response): Promise<void> => {
 	try {
 		const reporterId = getUserId(req);
@@ -50,26 +53,33 @@ const createReport = async (req: Request, res: Response): Promise<void> => {
 
 		const reporterUsername = (await findUsername(reporterId)) ?? `#${reporterId}`;
 
-		const lines = [
-			`Type : ${TYPE_LABELS[type]}`,
-			`Signalé par : ${reporterUsername} (id ${reporterId})`,
+		const fields: DiscordEmbedField[] = [
+			{ name: "Signalé par", value: `${reporterUsername} (id ${reporterId})`, inline: true },
 		];
 
 		if (typeof reportedUserId === "number") {
 			const reportedUsername = (await findUsername(reportedUserId)) ?? `#${reportedUserId}`;
-			lines.push(`Joueur signalé : ${reportedUsername} (id ${reportedUserId})`);
+			fields.push({ name: "Joueur signalé", value: `${reportedUsername} (id ${reportedUserId})`, inline: true });
 		}
 		if (matchId) {
-			lines.push(`Match : ${matchId}`);
+			fields.push({ name: "Match", value: matchId, inline: true });
 		}
-		lines.push("", description);
+		const descriptionField = description.length > MAX_DESCRIPTION_FIELD_LENGTH
+			? `${description.slice(0, MAX_DESCRIPTION_FIELD_LENGTH)}… (tronqué)`
+			: description;
+		fields.push({ name: "Description", value: descriptionField });
 
-		await sendMail({
-			subject: `[Wyrdane] Signalement ${TYPE_LABELS[type]} - ${reporterUsername}`,
-			text: lines.join("\n"),
-		});
+		await sendDiscordWebhook(
+			{
+				title: `🚩 Signalement ${TYPE_LABELS[type]}`,
+				color: type === "cheating" ? 0xb02e2e : 0xd6a94a,
+				timestamp: new Date().toISOString(),
+				fields,
+			},
+			`${TYPE_LABELS[type]} par ${reporterUsername}`,
+		);
 
-		res.sendStatus(200);
+		res.status(200).json({ success: true });
 	} catch (error) {
 		console.error(error);
 		res.status(500).json({ message: "Server error" });
