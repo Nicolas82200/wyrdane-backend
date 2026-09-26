@@ -50,7 +50,7 @@ const QUEST_TEMPLATES: QuestTemplate[] = [
 	...raceQuestTemplates(),
 ];
 
-const QUESTS_PER_DAY = 2;
+const QUESTS_PER_DAY = 3;
 
 interface DailyQuestRow extends RowDataPacket {
 	id: number;
@@ -232,6 +232,7 @@ const claimQuest = async (
 
 export {
 	QUEST_TEMPLATES,
+	QUESTS_PER_DAY,
 	QuestNotFoundError,
 	QuestNotCompletedError,
 	QuestAlreadyClaimedError,

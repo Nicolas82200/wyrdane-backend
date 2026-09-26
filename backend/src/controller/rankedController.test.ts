@@ -29,6 +29,9 @@ vi.mock("../model/uniqueQuestModel", () => ({
 vi.mock("../model/levelModel", () => ({
 	getLevel: vi.fn(),
 }));
+vi.mock("../model/onboardingQuestModel", () => ({
+	progressForMatch: vi.fn(),
+}));
 vi.mock("../model/friendModel", () => ({
 	findFriendship: vi.fn(),
 }));
@@ -49,6 +52,7 @@ import { progressForMatch } from "../model/questModel";
 import { progressForMatch as progressWeeklyForMatch } from "../model/weeklyQuestModel";
 import { progressForMatch as progressMonthlyForMatch } from "../model/monthlyQuestModel";
 import { progressForMatch as progressUniqueForMatch, progressForRankTier } from "../model/uniqueQuestModel";
+import { progressForMatch as progressOnboardingForMatch } from "../model/onboardingQuestModel";
 import { getLevel } from "../model/levelModel";
 import { findFriendship } from "../model/friendModel";
 import { issueMatchSessionToken } from "../helper/matchSessionToken";
@@ -78,6 +82,7 @@ const mocked = {
 	progressMonthlyForMatch: progressMonthlyForMatch as ReturnType<typeof vi.fn>,
 	progressUniqueForMatch: progressUniqueForMatch as ReturnType<typeof vi.fn>,
 	progressForRankTier: progressForRankTier as ReturnType<typeof vi.fn>,
+	progressOnboardingForMatch: progressOnboardingForMatch as ReturnType<typeof vi.fn>,
 	getLevel: getLevel as ReturnType<typeof vi.fn>,
 	findFriendship: findFriendship as ReturnType<typeof vi.fn>,
 };
@@ -311,12 +316,15 @@ describe("reportMatch", () => {
 			ratingA: 1016,
 			ratingB: 984,
 		});
+		mocked.getLevel.mockResolvedValue({ level: 7, xp: 0, xpToNext: 135 });
 		const req = reqAs(1, { clientMatchId: "m1", opponentId: 2, winnerId: 1 });
 		const res = mockRes();
 
 		await reportMatch(req, res);
 
 		expect(mocked.confirmMatch).toHaveBeenCalledWith("m1", 1, 2, 1, "ranked", 0);
+		expect(mocked.progressOnboardingForMatch).toHaveBeenCalledWith(1, 4, "ranked", true);
+		expect(mocked.progressOnboardingForMatch).toHaveBeenCalledWith(2, 7, "ranked", false);
 		expect(res.status).toHaveBeenCalledWith(200);
 		expect(res.json).toHaveBeenCalledWith(
 			expect.objectContaining({ status: "confirmed", xpGained: 50, level: 4, xp: 5, xpToNext: 130, rewards: [] }),

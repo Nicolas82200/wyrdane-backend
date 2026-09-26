@@ -4,6 +4,8 @@ import db from "./db";
 import { grantCard, getOwnedQuantity, MAX_COPIES_PER_CARD, DUST_VALUE_BY_RARITY } from "./collectionModel";
 import { credit, debit, debitFreePack, creditFreePacks, getBalance, getFreePacks } from "./currencyModel";
 import { progressForPackOpen } from "./uniqueQuestModel";
+import { progressForPackPurchase } from "./onboardingQuestModel";
+import { getLevel } from "./levelModel";
 
 import type { Cards } from "../types";
 
@@ -116,6 +118,10 @@ const openPack = async (userId: number, free = false): Promise<{ cards: DrawResu
 		// ni faire échouer la réponse au client, qui a bien reçu son pack.
 		try {
 			await progressForPackOpen(userId);
+			if (!free) {
+				const { level } = await getLevel(userId);
+				await progressForPackPurchase(userId, level);
+			}
 		} catch (error) {
 			console.error("openPack: échec de la progression de quête après commit", error);
 		}

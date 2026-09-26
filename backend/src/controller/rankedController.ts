@@ -20,6 +20,7 @@ import { progressForMatch } from "../model/questModel";
 import { progressForMatch as progressWeeklyForMatch } from "../model/weeklyQuestModel";
 import { progressForMatch as progressMonthlyForMatch } from "../model/monthlyQuestModel";
 import { progressForMatch as progressUniqueForMatch, progressForRankTier } from "../model/uniqueQuestModel";
+import { progressForMatch as progressOnboardingForMatch } from "../model/onboardingQuestModel";
 import { getLevel } from "../model/levelModel";
 import { findFriendship } from "../model/friendModel";
 import { getUserId } from "../helper/requestUser";
@@ -176,6 +177,11 @@ const reportMatch = async (req: Request, res: Response): Promise<void> => {
 			await progressForRankTier(userId, ratingA);
 			await progressForRankTier(opponentId, ratingB);
 		}
+		// `level` = niveau post-match de userId, déjà destructuré ci-dessus ;
+		// celui de l'adversaire n'est lu qu'ici, sans intérêt pour la réponse.
+		await progressOnboardingForMatch(userId, level, "ranked", winnerId === userId);
+		const { level: opponentLevel } = await getLevel(opponentId);
+		await progressOnboardingForMatch(opponentId, opponentLevel, "ranked", winnerId === opponentId);
 		res.status(200).json({ status: "confirmed", xpGained, level, xp, xpToNext, rewards });
 	} catch (error) {
 		console.error(error);

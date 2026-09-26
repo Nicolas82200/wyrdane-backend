@@ -3,6 +3,7 @@ import type { PoolConnection } from "mysql2/promise";
 import db from "./db";
 import { credit, creditFreePacks } from "./currencyModel";
 import { grantCard, getOwnedQuantity, MAX_COPIES_PER_CARD, DUST_VALUE_BY_RARITY } from "./collectionModel";
+import { progressForLevel as progressOnboardingForLevel } from "./onboardingQuestModel";
 
 import type { Cards } from "../types";
 
@@ -202,6 +203,14 @@ const applyXp = async (userId: number, amount: number, connection: PoolConnectio
 		xp -= threshold;
 		level += 1;
 		rewards.push(await grantLevelReward(userId, level, connection));
+		// Volontairement hors de la transaction en cours (voir le commentaire de
+		// progressForLevel) : une erreur ici ne doit jamais faire échouer l'octroi
+		// d'XP/de récompense de niveau, déjà effectué.
+		try {
+			await progressOnboardingForLevel(userId, level);
+		} catch (error) {
+			console.error("applyXp: échec de la progression de quête d'onboarding après passage de niveau", error);
+		}
 		threshold = xpToReachNextLevel(level);
 	}
 
