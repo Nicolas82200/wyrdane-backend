@@ -33,15 +33,31 @@ TARGET_DIR="$BACKUP_DIR/$KIND"
 TARGET="$TARGET_DIR/wyrdane_${STAMP}.sql.gz"
 
 notify_failure() {
+	# Desarme le trap AVANT tout le reste : sans cela, le `exit 1` qui suit chaque
+	# appel redeclenche ERR, et une seule panne envoyait trois alertes.
+	trap - ERR
 	local message="$1"
-	echo "[backup-db] ÉCHEC : $message" >&2
+	echo "[backup-db] ECHEC : $message" >&2
 	if [ -n "${DISCORD_CRASH_WEBHOOK_URL:-}" ]; then
-		# jq n'est pas garanti présent sur le VPS : on échappe à la main le
-		# strict nécessaire (guillemets, retours ligne) pour un JSON valide.
-		local escaped
-		escaped="$(printf '%s' "$message" | sed 's/\/\\/g; s/"/\\"/g' | tr '\n' ' ')"
-		curl -fsS -m 15 -X POST -H "Content-Type: application/json" \
-			-d "{\"content\":\":rotating_light: **Sauvegarde BDD Wyrdane en échec** — $escaped\"}" \
+		# jq n'est pas garanti present sur le VPS, et echapper du JSON a la main en
+		# sed est precisement le genre de detail qui casse en silence (c'est arrive).
+		# On retire donc les seuls caracteres qui auraient un effet en JSON
+		# (guillemets, antislashs, retours ligne) : les messages de ce script sont
+		# ecrits pour rester comprehensibles sans eux.
+		local safe
+		safe="$(printf '%s' "$message" | tr -d '\\"' | tr '\n' ' ')"
+		# Les messages ci-dessus sont en ASCII, mais un chemin ou un nom de variable
+		# interpole peut ne pas l'etre : un octet non-ASCII mal transmis par le shell
+		# fait refuser la requete par Discord (400 constate en test), et l'alerte se
+		# perdrait precisement au moment ou elle compte. iconv vient de la glibc ; si
+		# l'appel echoue, on garde le message tel quel plutot que de perdre l'alerte.
+		local ascii_safe
+		ascii_safe="$(printf '%s' "$safe" | iconv -f UTF-8 -t ASCII//TRANSLIT 2>/dev/null || true)"
+		[ -n "$ascii_safe" ] && safe="$ascii_safe"
+		local payload
+		payload="{\"content\":\":rotating_light: **Sauvegarde BDD Wyrdane en echec** - $safe\"}"
+		curl -fsS -m 15 -X POST -H 'Content-Type: application/json' \
+			-d "$payload" \
 			"$DISCORD_CRASH_WEBHOOK_URL" >/dev/null || true
 	fi
 }
@@ -51,7 +67,11 @@ for var in DB_NAME DB_USER DB_PASSWORD; do
 	[ -n "${!var:-}" ] || { notify_failure "variable $var absente de .env"; exit 1; }
 done
 
-mkdir -p "$TARGET_DIR"
+# Les DEUX sous-dossiers, pas seulement celui du jour : la rotation plus bas
+# balaie daily/ ET weekly/, et un `find` sur un dossier inexistant renvoie un
+# code non nul — avec `pipefail`, cela déclencherait le trap ERR et une fausse
+# alerte Discord le premier dimanche (weekly/ créé, daily/ jamais visité).
+mkdir -p "$BACKUP_DIR/daily" "$BACKUP_DIR/weekly"
 
 # MYSQL_PWD (passé au conteneur via -e) plutôt que -p en ligne de commande :
 # le mot de passe n'apparaît alors pas dans la liste des processus.
@@ -60,7 +80,7 @@ if ! docker compose exec -T -e MYSQL_PWD="$DB_PASSWORD" mysql \
 		--default-character-set=utf8mb4 \
 		-u "$DB_USER" "$DB_NAME" | gzip -9 > "$TARGET.part"; then
 	rm -f "$TARGET.part"
-	notify_failure "mysqldump a échoué (conteneur mysql arrêté ? identifiants invalides ?)"
+	notify_failure "mysqldump a echoue (conteneur mysql arrete ? identifiants invalides ?)"
 	exit 1
 fi
 
@@ -68,7 +88,7 @@ fi
 # le dump est allé jusqu'au bout et que le gzip est lisible de bout en bout.
 if ! gzip -dc "$TARGET.part" | tail -5 | grep -q "Dump completed"; then
 	rm -f "$TARGET.part"
-	notify_failure "dump tronqué ou illisible (marqueur de fin absent) — sauvegarde précédente conservée"
+	notify_failure "dump tronque ou illisible (marqueur de fin absent) - sauvegarde precedente conservee"
 	exit 1
 fi
 
@@ -87,7 +107,7 @@ find "$BACKUP_DIR/weekly" -name 'wyrdane_*.sql.gz' -type f 2>/dev/null \
 # Non fatal : mieux vaut une sauvegarde locale seule qu'aucune, mais on alerte.
 if [ -n "${BACKUP_REMOTE:-}" ]; then
 	rsync -az --timeout=120 "$TARGET" "$BACKUP_REMOTE/" \
-		|| notify_failure "copie hors site vers $BACKUP_REMOTE impossible (le dump local, lui, est bien écrit)"
+		|| notify_failure "copie hors site vers $BACKUP_REMOTE impossible (le dump local, lui, est bien ecrit)"
 fi
 
 trap - ERR

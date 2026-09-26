@@ -65,13 +65,24 @@ describe("deleteMyAccount", () => {
 
 	// Le garde-fou qui compte : l'action est irréversible, elle ne doit jamais
 	// partir d'une requête approximative.
-	it("ne supprime rien sans la confirmation exacte", async () => {
-		for (const confirm of [undefined, "", "supprimer", "SUPPRIMER  ", "oui"]) {
+	it("ne supprime rien sans un mot de confirmation reconnu", async () => {
+		for (const confirm of [undefined, "", "oui", "SUPPRIME", "effacer", "DEL"]) {
 			const res = mockRes();
 			await deleteMyAccount(reqAs(1, confirm === undefined ? {} : { confirm }), res);
 			expect(res.status).toHaveBeenCalledWith(400);
 		}
 		expect(mockedDelete).not.toHaveBeenCalled();
+	});
+
+	// Le client fait taper le mot dans la langue du joueur (voir
+	// ACCOUNT_DATA_DELETE_WORD côté jeu), casse et espaces parasites tolérés.
+	it("accepte le mot de confirmation dans les deux langues", async () => {
+		for (const confirm of ["SUPPRIMER", "DELETE", "supprimer", " delete "]) {
+			mockedDelete.mockResolvedValue(undefined);
+			const res = mockRes();
+			await deleteMyAccount(reqAs(9, { confirm }), res);
+			expect(res.status).toHaveBeenCalledWith(200);
+		}
 	});
 
 	it("supprime et invalide la session quand la confirmation est exacte", async () => {
