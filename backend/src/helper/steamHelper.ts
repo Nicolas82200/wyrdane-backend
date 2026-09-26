@@ -95,11 +95,16 @@ const authenticateSteamTicket = async (ticket: string): Promise<string | null> =
   if (!params || params.result !== "OK") return null;
   if (params.vacbanned || params.publisherbanned) return null;
   // ownersteamid != steamid = le jeu est joué via le partage familial Steam.
-  // Refusé : c'est le vecteur le plus simple pour multiplier les comptes depuis
-  // une seule licence (farm de parrainages, collusion en classé). Wyrdane n'a
-  // aucun cas d'usage légitime de partage familial aujourd'hui — si cela change,
-  // c'est ici qu'il faudra rouvrir, sciemment.
-  if (params.ownersteamid && params.ownersteamid !== params.steamid) {
+  // Refusé par défaut : c'est le vecteur le plus simple pour multiplier les
+  // comptes depuis une seule licence (farm de parrainages, collusion en classé).
+  // C'est un arbitrage produit, pas une évidence technique : le partage familial
+  // est une fonctionnalité légitime de Steam, et l'accepter écarterait de vrais
+  // joueurs. D'où le réglage plutôt qu'une règle figée dans le code —
+  // ALLOW_STEAM_FAMILY_SHARING=true le réautorise sans toucher au code.
+  // Sans effet tant que STEAM_APP_ID vaut 480 : Spacewar étant gratuit pour
+  // tous, ownersteamid y est toujours égal à steamid.
+  const allowFamilySharing = process.env.ALLOW_STEAM_FAMILY_SHARING === "true";
+  if (!allowFamilySharing && params.ownersteamid && params.ownersteamid !== params.steamid) {
     console.warn(
       `authenticateSteamTicket: ticket refusé (partage familial Steam, owner=${params.ownersteamid})`,
     );

@@ -47,6 +47,26 @@ describe("authenticateSteamTicket", () => {
 		expect(await authenticateSteamTicket("abcdef")).toBeNull();
 	});
 
+	it("accepte le partage familial quand ALLOW_STEAM_FAMILY_SHARING=true", async () => {
+		process.env.NODE_ENV = "production";
+		process.env.ALLOW_STEAM_FAMILY_SHARING = "true";
+		mockFetchOnce(
+			JSON.stringify({
+				response: {
+					params: {
+						result: "OK",
+						steamid: "76561198000000002",
+						ownersteamid: "76561198000000001",
+						vacbanned: false,
+						publisherbanned: false,
+					},
+				},
+			}),
+		);
+
+		expect(await authenticateSteamTicket("abcdef")).toBe("76561198000000002");
+	});
+
 	it("accepte un ticket dont le propriétaire est le joueur lui-même", async () => {
 		process.env.NODE_ENV = "production";
 		mockFetchOnce(
