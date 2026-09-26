@@ -49,7 +49,7 @@ const searchUsers = async (query: string, excludeUserId: number, limit = 20): Pr
 		`SELECT u.id, u.username, la.external_id AS steam_id
 		 FROM users u
 		 LEFT JOIN linked_accounts la ON la.user_id = u.id AND la.provider = 'steam'
-		 WHERE u.username LIKE ? AND u.id != ?
+		 WHERE u.username LIKE ? AND u.id != ? AND u.deleted_at IS NULL
 		 ORDER BY u.username
 		 LIMIT ?`,
 		[`%${query}%`, excludeUserId, limit],

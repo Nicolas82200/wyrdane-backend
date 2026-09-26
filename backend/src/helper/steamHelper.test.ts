@@ -25,6 +25,47 @@ afterEach(() => {
 });
 
 describe("authenticateSteamTicket", () => {
+	// Voir steamHelper.ts : une licence partagée permettrait de multiplier les
+	// comptes depuis un seul achat (farm de parrainages, collusion en classé).
+	it("refuse un ticket joué via le partage familial Steam", async () => {
+		process.env.NODE_ENV = "production";
+		mockFetchOnce(
+			JSON.stringify({
+				response: {
+					params: {
+						result: "OK",
+						steamid: "76561198000000002",
+						ownersteamid: "76561198000000001",
+						vacbanned: false,
+						publisherbanned: false,
+					},
+				},
+			}),
+		);
+		vi.spyOn(console, "warn").mockImplementation(() => {});
+
+		expect(await authenticateSteamTicket("abcdef")).toBeNull();
+	});
+
+	it("accepte un ticket dont le propriétaire est le joueur lui-même", async () => {
+		process.env.NODE_ENV = "production";
+		mockFetchOnce(
+			JSON.stringify({
+				response: {
+					params: {
+						result: "OK",
+						steamid: "76561198000000001",
+						ownersteamid: "76561198000000001",
+						vacbanned: false,
+						publisherbanned: false,
+					},
+				},
+			}),
+		);
+
+		expect(await authenticateSteamTicket("abcdef")).toBe("76561198000000001");
+	});
+
 	it("uses the DEV bypass for DEV: tickets when DEV_SKIP_STEAM_VERIFY is enabled outside production", async () => {
 		process.env.NODE_ENV = "development";
 		process.env.DEV_SKIP_STEAM_VERIFY = "true";

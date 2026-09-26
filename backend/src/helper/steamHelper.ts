@@ -7,6 +7,21 @@
 // personnelle (steamcommunity.com/dev/apikey), sans accès Steamworks
 // Partner. Le domaine partner.steam-api.com, lui, exige une vraie clé
 // Publisher/Partner Group — inutilisable avec une clé personnelle (403).
+//
+// /!\ LIMITE DE SÉCURITÉ CONNUE, à lever au passage sur l'AppID réel (5052390)
+// avec une clé Publisher. Tant qu'on vérifie les tickets pour l'AppID 480 :
+//   - la vérification ne prouve pas la possession de Wyrdane (480 est public,
+//     n'importe quel compte Steam peut donc créer un compte joueur) ;
+//   - un ticket de session émis pour l'AppID 480 par un AUTRE programme est
+//     accepté ici. Un tiers qui collecte les tickets 480 de ses propres
+//     utilisateurs (beaucoup de jeux en développement utilisent cet AppID)
+//     pourrait les rejouer contre cette API et prendre la main sur les comptes
+//     Wyrdane correspondants ;
+//   - les bans VAC/éditeur rendus par Steam ne concernent pas notre app, donc
+//     un bannissement Wyrdane crédible est impossible.
+// Le passage à `STEAM_APP_ID=5052390` + clé Publisher ferme les trois d'un coup,
+// sans autre changement de code : d'où l'avertissement de démarrage ci-dessous,
+// pour que cet état provisoire ne s'oublie pas en production.
 
 interface AuthenticateUserTicketResponse {
   response?: {
@@ -27,6 +42,18 @@ interface AuthenticateUserTicketResponse {
 // Préfixe reconnu uniquement en dev (voir DEV_SKIP_STEAM_VERIFY) : un ticket
 // réel de GodotSteam est un buffer binaire hex-encodé, jamais sous cette forme.
 const DEV_TICKET_PREFIX = "DEV:";
+
+// AppID public de test (Spacewar). Voir l'en-tête de ce fichier : s'en servir
+// en production est une faiblesse d'authentification assumée, mais elle doit
+// rester visible plutôt que de se fondre dans la configuration.
+const STEAM_TEST_APP_ID = "480";
+if (process.env.NODE_ENV === "production" && process.env.STEAM_APP_ID === STEAM_TEST_APP_ID) {
+  console.warn(
+    "⚠️  STEAM_APP_ID=480 (Spacewar) en production : les tickets de session ne " +
+      "prouvent ni la possession du jeu ni leur provenance (voir l'en-tête de " +
+      "steamHelper.ts). À remplacer par l'AppID 5052390 + clé Publisher.",
+  );
+}
 
 const authenticateSteamTicket = async (ticket: string): Promise<string | null> => {
   // Bypass dev uniquement : AuthenticateUserTicket exige une clé Publisher
@@ -67,6 +94,17 @@ const authenticateSteamTicket = async (ticket: string): Promise<string | null> =
   const params = data.response?.params;
   if (!params || params.result !== "OK") return null;
   if (params.vacbanned || params.publisherbanned) return null;
+  // ownersteamid != steamid = le jeu est joué via le partage familial Steam.
+  // Refusé : c'est le vecteur le plus simple pour multiplier les comptes depuis
+  // une seule licence (farm de parrainages, collusion en classé). Wyrdane n'a
+  // aucun cas d'usage légitime de partage familial aujourd'hui — si cela change,
+  // c'est ici qu'il faudra rouvrir, sciemment.
+  if (params.ownersteamid && params.ownersteamid !== params.steamid) {
+    console.warn(
+      `authenticateSteamTicket: ticket refusé (partage familial Steam, owner=${params.ownersteamid})`,
+    );
+    return null;
+  }
 
   return params.steamid;
 };

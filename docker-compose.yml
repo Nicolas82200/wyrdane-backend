@@ -59,9 +59,12 @@ services:
       SMTP_FROM: ${SMTP_FROM}
       CONTACT_EMAIL_TO: ${CONTACT_EMAIL_TO}
       DISCORD_CRASH_WEBHOOK_URL: ${DISCORD_CRASH_WEBHOOK_URL}
-      # Diagnostic TEMPORAIRE (voir router/debugRouter.ts) — à retirer avec la
-      # route une fois le diagnostic terminé.
-      DEBUG_MATCHMAKING_KEY: ${DEBUG_MATCHMAKING_KEY}
+      # Exige un jeton de session de match valide sur tout rapport de partie
+      # classée (voir helper/matchSessionToken.ts, rankedController.reportMatch).
+      # Le client qui transmet ce jeton est déployé depuis le 2026-09-24 : le
+      # mode permissif (rapport sans jeton simplement journalisé) n'a plus de
+      # raison d'être et laissait forger des matchs entre deux comptes.
+      ENFORCE_MATCH_SESSION_TOKEN: "true"
     ports:
       # Exposé uniquement sur localhost -> Nginx (natif) fait le proxy vers ici
       - "127.0.0.1:3000:3000"
