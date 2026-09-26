@@ -30,6 +30,7 @@ const USERS_COLUMNS_TO_ENSURE: { name: string; ddl: string }[] = [
 	{ name: "xp", ddl: "xp INT NOT NULL DEFAULT 0" },
 	{ name: "last_heartbeat_at", ddl: "last_heartbeat_at TIMESTAMP NULL DEFAULT NULL" },
 	{ name: "in_game", ddl: "in_game BOOLEAN NOT NULL DEFAULT FALSE" },
+	{ name: "deleted_at", ddl: "deleted_at TIMESTAMP NULL DEFAULT NULL" },
 ];
 
 const ensureUsersColumns = async (connection: mysql.Connection): Promise<void> => {

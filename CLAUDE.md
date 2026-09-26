@@ -228,6 +228,45 @@ docker compose exec backend node dist/database/sync.js
 
 (`db:migrate`/`dist/database/migrate.js` de la même façon, mais c'est une commande destructive réservée au dev/CI — jamais contre la base de prod.)
 
+### Sauvegardes de la base (`scripts/backup-db.sh`)
+
+`scripts/backup-db.sh` produit un dump gzip de la base de prod. À lancer **sur le VPS**, depuis `/var/www/wyrdane-backend`. Le script : dump `--single-transaction` (aucun verrou, la prod continue de tourner), vérifie le marqueur `Dump completed` avant de remplacer quoi que ce soit (un dump tronqué n'écrase jamais une sauvegarde valide), écrit dans `daily/` ou `weekly/` selon le jour, applique la rotation (7 quotidiens / 8 hebdomadaires par défaut) **après** avoir écrit un dump valide, et alerte sur le webhook Discord (`DISCORD_CRASH_WEBHOOK_URL`, déjà configuré) au moindre échec — une sauvegarde qui échoue en silence ne vaut pas mieux que pas de sauvegarde.
+
+Installation du cron (compte `deploy`, qui est dans le groupe `docker`) :
+
+```bash
+crontab -e
+# Tous les jours à 3h05, sortie dans un log dédié :
+5 3 * * * cd /var/www/wyrdane-backend && ./scripts/backup-db.sh >> /var/log/wyrdane-backup.log 2>&1
+```
+
+`BACKUP_REMOTE` dans `.env` (destination rsync/ssh) déclenche en plus une copie **hors du VPS** : à renseigner, une sauvegarde qui ne vit que sur la machine qu'elle protège ne couvre ni la perte du VPS ni une erreur de manipulation sur son disque.
+
+Restauration : `./scripts/restore-db.sh <dump.sql.gz>`. Opération destructive — le script exige de taper `RESTAURER`, prend d'abord une sauvegarde de sécurité de l'état courant (`pre-restore_*.sql.gz`, le filet qui permet de revenir en arrière si on restaure le mauvais dump) puis redémarre le conteneur API. **Tester une restauration au moins une fois** sur une base jetable : une sauvegarde jamais restaurée est une hypothèse, pas une garantie.
+
+### Données personnelles & RGPD (`accountModel.ts`)
+
+Deux routes, montées sur `/api/users` (auth + CSRF comme le reste) :
+- `GET /api/users/me/export` — renvoie en JSON tout ce que la base contient sur le demandeur (compte, collection, decks, historique, ledgers, quêtes, amis, messages, connexions), en pièce jointe téléchargeable. 5 appels/h max, la requête est lourde.
+- `DELETE /api/users/me` — exige `{ "confirm": "SUPPRIMER" }` dans le corps, puis efface les données personnelles et invalide le cookie de session.
+
+La suppression **anonymise** au lieu de faire un `DELETE FROM users`. Raison : toutes les clés étrangères cascadent, donc un DELETE sec emportait l'historique de parties de l'**adversaire** (`match_history` cascade sur `player1_id` ET `player2_id`) et le journal d'achats réels (`purchase_ledger`, pièce comptable à conserver). L'anonymisation retire le SteamID (`linked_accounts`, la seule donnée qui rattache une ligne à une personne), purge tout contenu personnel (messages, amis, invitations, decks, collection, quêtes, stats) et marque `users.deleted_at` ; ce qui reste n'est plus rattachable à personne. Le SteamID étant libéré, se reconnecter avec le même compte Steam crée un compte **neuf** — la suppression n'est pas un bannissement, et elle est irréversible.
+
+Les comptes anonymisés sont exclus de la recherche de joueurs (`friendModel.searchUsers`) et du classement (`LEADERBOARD_SELECT` + son `COUNT`, filtrés sur `deleted_at IS NULL`).
+
+Effacer le cookie ne suffisait pas : un JWT émis avant la suppression reste valide jusqu'à 1h, donc une seconde session (jeu et site ouverts en parallèle) continuait d'agir sur le compte effacé et pouvait y recréer quêtes, présence, decks. `middleware/deletedAccount.ts` tient une table en mémoire des comptes supprimés depuis moins d'une heure, consultée par `authorization` (`middleware/auth.ts`) — pas de requête en base sur le chemin chaud, l'entrée expirant d'elle-même puisque au-delà d'une heure aucun token d'avant la suppression ne peut plus être valide. Même hypothèse mono-process que le limiteur de débit.
+
+### Notes de sécurité
+
+- **`app.set("trust proxy", 1)`** (`app.ts`) est indispensable derrière Nginx : sans lui, `req.ip` vaut l'adresse du proxy pour toutes les requêtes et le limiteur de débit par IP met tout le monde dans le même seau — un seul client pouvait alors épuiser le quota de `/api/auth/steam` et empêcher n'importe qui de se connecter. `1` et non `true`, pour que `X-Forwarded-For` ne soit pas usurpable par le client.
+
+  **Ce réglage suppose que Nginx envoie bien l'en-tête.** À vérifier une fois dans `/etc/nginx/sites-available/api.wyrdane.com` : le bloc `location` doit contenir `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;` (et, tant qu'on y est, `proxy_set_header X-Real-IP $remote_addr;`). Sans cette ligne côté proxy, `trust proxy` ne change rien et le limiteur reste inopérant, sans aucun signe visible. Contrôle rapide (route publique, pas d'auth) : `for i in $(seq 1 130); do curl -s -o /dev/null -w '%{http_code}
+' -X POST -H 'Content-Type: application/json' -H 'X-Forwarded-For: 203.0.113.7' -d '{"path":"/test"}' https://api.wyrdane.com/api/analytics/pageview; done | sort | uniq -c` doit finir par des 429 (quota : 120/10 min), et une IP factice différente doit repartir à zéro — si les deux partagent le même quota, l'en-tête n'arrive pas jusqu'à Express.
+- **Limites de corps de requête** : 100 ko globalement, 6 Mo pour le seul `/api/crash-report` (parseur monté avant le global, sur ce chemin). Un rapport de plantage transporte le log de session complet ; avec la seule limite par défaut d'Express, tout rapport un peu gros était rejeté en 413 avant d'atteindre son contrôleur.
+- **`ENFORCE_MATCH_SESSION_TOKEN: "true"`** (fixé dans `docker-compose.yml`) : tout rapport de match doit porter un jeton de session émis par l'appariement (`helper/matchSessionToken.ts`). Sans ce garde-fou, deux comptes complices pouvaient forger des matchs et farmer MMR/XP/quêtes.
+- **`STEAM_APP_ID=480`** reste une faiblesse d'authentification connue et non fermée : la vérification de ticket ne prouve ni la possession du jeu ni la provenance du ticket, et aucun bannissement crédible n'est possible. Détail complet dans l'en-tête de `src/helper/steamHelper.ts` ; l'API journalise un avertissement au démarrage tant que c'est 480 en production. Seul correctif : AppID 5052390 + clé Publisher Steamworks.
+- Les tickets joués via le **partage familial Steam** sont refusés (`ownersteamid != steamid`) : une licence partagée permettrait de multiplier les comptes depuis un seul achat. Inopérant tant que l'AppID est 480 (Spacewar est gratuit pour tous), actif dès le passage à l'AppID réel — à rouvrir sciemment si le partage familial doit être supporté.
+
 ### `keep-alive.yml` obsolète
 `.github/workflows/keep-alive.yml` (ping périodique de l'URL Render pour éviter la mise en veille du plan gratuit) est devenu obsolète depuis le passage au VPS — à supprimer une fois le service Render définitivement coupé.
 

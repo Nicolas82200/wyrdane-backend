@@ -356,7 +356,7 @@ const LEADERBOARD_SELECT = `
 	FROM ranked_stats rs
 	JOIN users u ON u.id = rs.user_id
 	LEFT JOIN linked_accounts la ON la.user_id = rs.user_id AND la.provider = 'steam'
-	WHERE rs.season = ?
+	WHERE rs.season = ? AND u.deleted_at IS NULL
 `;
 
 const getLeaderboard = async (
@@ -368,8 +368,13 @@ const getLeaderboard = async (
 	const hasMin = typeof minMmr === "number";
 	const hasMax = typeof maxMmr === "number";
 	const [[{ total }]] = await db.query<(RowDataPacket & { total: number })[]>(
-		`SELECT COUNT(*) AS total FROM ranked_stats WHERE season = ?
-		 ${hasMin ? "AND mmr >= ?" : ""} ${hasMax ? "AND mmr < ?" : ""}`,
+		// Même filtre que LEADERBOARD_SELECT (jointure sur users pour écarter les
+		// comptes anonymisés) : sans lui, le total et la page affichée pourraient
+		// diverger d'une ligne.
+		`SELECT COUNT(*) AS total FROM ranked_stats rs
+		 JOIN users u ON u.id = rs.user_id
+		 WHERE rs.season = ? AND u.deleted_at IS NULL
+		 ${hasMin ? "AND rs.mmr >= ?" : ""} ${hasMax ? "AND rs.mmr < ?" : ""}`,
 		[CURRENT_SEASON, ...(hasMin ? [minMmr] : []), ...(hasMax ? [maxMmr] : [])],
 	);
 	const [rows] = await db.query<(LeaderboardRow & RowDataPacket)[]>(
@@ -408,9 +413,16 @@ const getLeaderboardAroundUser = async (
 	const hasMin = typeof minMmr === "number";
 	const hasMax = typeof maxMmr === "number";
 	const boundParams = [...(hasMin ? [minMmr] : []), ...(hasMax ? [maxMmr] : [])];
-	const boundClause = `${hasMin ? "AND mmr >= ?" : ""} ${hasMax ? "AND mmr < ?" : ""}`;
+	const boundClause = `${hasMin ? "AND rs.mmr >= ?" : ""} ${hasMax ? "AND rs.mmr < ?" : ""}`;
 	const [[{ before }]] = await db.query<(RowDataPacket & { before: number })[]>(
-		`SELECT COUNT(*) AS before FROM ranked_stats WHERE season = ? AND mmr > ? ${boundClause}`,
+		// Jointure sur users pour le même filtre que LEADERBOARD_SELECT : sans elle,
+		// un compte anonymisé encore porteur d'une ligne ranked_stats serait compté
+		// ici mais absent de la page renvoyée juste après, et la fenêtre serait
+		// décalée d'un rang. Ce cas existe : un match rapporté par l'adversaire
+		// après la suppression peut recréer la ligne (voir rankedModel.confirmMatch).
+		`SELECT COUNT(*) AS before FROM ranked_stats rs
+		 JOIN users u ON u.id = rs.user_id
+		 WHERE rs.season = ? AND u.deleted_at IS NULL AND rs.mmr > ? ${boundClause}`,
 		[CURRENT_SEASON, me.mmr, ...boundParams],
 	);
 	const offset = Math.max(0, before - Math.floor(pageSize / 2));

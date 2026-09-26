@@ -77,7 +77,13 @@ CREATE TABLE users (
   -- dernier heartbeat a été envoyé depuis une bataille, jamais affiché sans
   -- last_heartbeat_at récent.
   last_heartbeat_at TIMESTAMP NULL DEFAULT NULL,
-  in_game BOOLEAN NOT NULL DEFAULT FALSE
+  in_game BOOLEAN NOT NULL DEFAULT FALSE,
+  -- Compte anonymisé à la demande du joueur (RGPD, voir accountModel.ts) : la
+  -- ligne survit pour que l'historique de parties de ses adversaires et les
+  -- écritures comptables restent cohérents, mais elle ne porte plus aucune
+  -- donnée personnelle et son SteamID a été libéré (linked_accounts vidé), donc
+  -- une reconnexion avec le même compte Steam crée un compte neuf.
+  deleted_at TIMESTAMP NULL DEFAULT NULL
 );
 
 -- Une ligne par identité liée (Steam aujourd'hui, potentiellement email/Google/Apple
