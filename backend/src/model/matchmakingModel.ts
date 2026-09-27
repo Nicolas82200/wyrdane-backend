@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { PoolConnection, RowDataPacket } from "mysql2/promise";
 import db from "./db";
 import { getStats } from "./rankedModel";
+import { toExactLobbyId } from "../helper/steamLobbyId";
 import { issueMatchSessionToken } from "../helper/matchSessionToken";
 
 // Fenêtre d'appariement élargie progressivement pour éviter des temps
@@ -196,7 +197,7 @@ const toStatusResult = (ticket: TicketRow): QueueStatusResult => {
 			status: "matched",
 			role: ticket.role as "host" | "guest",
 			opponent_id: ticket.opponent_id as number,
-			steam_lobby_id: ticket.steam_lobby_id ?? undefined,
+			steam_lobby_id: toExactLobbyId(ticket.steam_lobby_id),
 			match_id: ticket.match_id as string,
 			match_session_token: ticket.match_session_token as string,
 		};
