@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 
 import { createInvite, getIncomingInvites, getInviteStatus, respondInvite, cancelInvite } from "../model/inviteModel";
 import { getUserId } from "../helper/requestUser";
+import { isValidLobbyId, toExactLobbyId } from "../helper/steamLobbyId";
 
 // POST /api/invites — l'expéditeur a déjà hébergé son lobby Steam côté client
 // (voir MatchmakingOverlay.gd) avant d'appeler ceci, steamLobbyId est donc
@@ -23,7 +24,7 @@ const create = async (req: Request, res: Response): Promise<void> => {
 			res.status(400).json({ message: "recipientId invalide" });
 			return;
 		}
-		if (typeof steamLobbyId !== "string" || !/^[1-9][0-9]{0,19}$/.test(steamLobbyId)) {
+		if (!isValidLobbyId(steamLobbyId)) {
 			res.status(400).json({ message: "steamLobbyId invalide (chaîne de chiffres attendue)" });
 			return;
 		}
@@ -100,7 +101,7 @@ const respond = (accept: boolean) => async (req: Request, res: Response): Promis
 		}
 		// steam_lobby_id reste une string (BIGINT renvoyé tel quel par mysql2) :
 		// un Number() ici corromprait l'id juste avant que le client rejoigne.
-		res.status(200).json({ status: invite.status, steamLobbyId: invite.steam_lobby_id });
+		res.status(200).json({ status: invite.status, steamLobbyId: toExactLobbyId(invite.steam_lobby_id) });
 	} catch (error) {
 		console.error(error);
 		res.status(500).json({ message: "Server error" });

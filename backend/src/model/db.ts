@@ -22,6 +22,26 @@ const pool = mysql.createPool({
   // Explicite plutôt que le défaut mysql2 (10) : rend la limite visible et
   // ajustable ici plutôt que dépendante d'une valeur implicite de la lib.
   connectionLimit: 10,
+  // OBLIGATOIRE — ne pas retirer. Sans cette option, mysql2 arrondit tout
+  // BIGINT de 14 chiffres ou plus DANS LE DRIVER, avant que le moindre code
+  // applicatif ne le voie : `if (len >= 14 && !supportBigNumbers) return
+  // Number(s)` (node_modules/mysql2/lib/packets/packet.js). C'est ce qui
+  // cassait le matchmaking : `matchmaking_tickets.steam_lobby_id` est un
+  // BIGINT contenant un CSteamID 64 bits de 18 chiffres (57 bits
+  // significatifs), rendu illisible par un double à 53 bits de mantisse —
+  // l'hôte créait le lobby ...141593584, l'invité tentait de rejoindre
+  // ...141593578, Steam refusait l'entrée en code 2
+  // (k_EChatRoomEnterResponseDoesntExist) et les deux joueurs repartaient en
+  // boucle de matchmaking. Le type TypeScript des lignes annonçait `string`,
+  // mais un type ne contraint pas ce que renvoie un driver au runtime : les
+  // tests mockent la base et passaient donc au vert sur un bug intact.
+  // Avec supportBigNumbers, mysql2 ne renvoie une chaîne que lorsque la valeur
+  // ne tient PAS exactement dans un Number (`Number.isSafeInteger`) — les
+  // entiers sûrs restent des nombres, donc aucun autre BIGINT du schéma n'est
+  // affecté : `purchase_ledger.order_id` est un auto-increment (toujours petit)
+  // et le SteamID64 du joueur est déjà stocké en VARCHAR
+  // (`linked_accounts.external_id`). Couvert par model/db.test.ts.
+  supportBigNumbers: true,
 });
 
 export default pool;

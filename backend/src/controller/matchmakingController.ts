@@ -3,6 +3,7 @@ import { Request, Response } from "express";
 import { joinQueue, getQueueStatus, reportLobby, cancelQueue } from "../model/matchmakingModel";
 import type { QueueMode } from "../model/matchmakingModel";
 import { getUserId } from "../helper/requestUser";
+import { isValidLobbyId } from "../helper/steamLobbyId";
 
 const joinQueueHandler = async (req: Request, res: Response): Promise<void> => {
 	try {
@@ -58,7 +59,7 @@ const reportLobbyHandler = async (req: Request, res: Response): Promise<void> =>
 		// explicitement plutôt que d'enregistrer un id corrompu, l'hôte relance
 		// simplement une recherche.
 		const { steamLobbyId } = req.body as { steamLobbyId?: unknown };
-		if (typeof steamLobbyId !== "string" || !/^[1-9][0-9]{0,19}$/.test(steamLobbyId)) {
+		if (!isValidLobbyId(steamLobbyId)) {
 			res.status(400).json({ message: "steamLobbyId invalide (chaîne de chiffres attendue)" });
 			return;
 		}
