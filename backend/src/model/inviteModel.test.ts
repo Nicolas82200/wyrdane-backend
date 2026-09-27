@@ -24,7 +24,7 @@ describe("createInvite", () => {
 	it("refuses when the two players aren't accepted friends", async () => {
 		mockedFindFriendship.mockResolvedValueOnce(null);
 
-		const result = await createInvite(1, 2, 123456);
+		const result = await createInvite(1, 2, "123456");
 
 		expect(result).toEqual({ ok: false, reason: "not_friends" });
 		expect(mockedDb.query).not.toHaveBeenCalled();
@@ -33,7 +33,7 @@ describe("createInvite", () => {
 	it("refuses when the friendship is still pending", async () => {
 		mockedFindFriendship.mockResolvedValueOnce({ id: 5, requester_id: 1, addressee_id: 2, status: "pending" });
 
-		const result = await createInvite(1, 2, 123456);
+		const result = await createInvite(1, 2, "123456");
 
 		expect(result).toEqual({ ok: false, reason: "not_friends" });
 	});
@@ -42,7 +42,7 @@ describe("createInvite", () => {
 		mockedFindFriendship.mockResolvedValueOnce({ id: 5, status: "accepted" });
 		mockedDb.query.mockResolvedValueOnce([[{ in_game: 0, is_online: 0 }]]);
 
-		const result = await createInvite(1, 2, 123456);
+		const result = await createInvite(1, 2, "123456");
 
 		expect(result).toEqual({ ok: false, reason: "recipient_unavailable" });
 	});
@@ -51,7 +51,7 @@ describe("createInvite", () => {
 		mockedFindFriendship.mockResolvedValueOnce({ id: 5, status: "accepted" });
 		mockedDb.query.mockResolvedValueOnce([[{ in_game: 1, is_online: 1 }]]);
 
-		const result = await createInvite(1, 2, 123456);
+		const result = await createInvite(1, 2, "123456");
 
 		expect(result).toEqual({ ok: false, reason: "recipient_unavailable" });
 	});
@@ -63,7 +63,7 @@ describe("createInvite", () => {
 		mockedDb.query.mockResolvedValueOnce([{ insertId: 42 }]); // INSERT
 		mockedDb.query.mockResolvedValueOnce([[{ id: 42, sender_id: 1, recipient_id: 2, status: "pending", steam_lobby_id: "123456" }]]); // re-fetch
 
-		const result = await createInvite(1, 2, 123456);
+		const result = await createInvite(1, 2, "123456");
 
 		expect(result).toEqual({
 			ok: true,
@@ -74,7 +74,7 @@ describe("createInvite", () => {
 		expect(cancelCall[1]).toEqual([1]);
 		const insertCall = mockedDb.query.mock.calls[2];
 		expect(insertCall[0]).toContain("INSERT INTO game_invites");
-		expect(insertCall[1]).toEqual([1, 2, 123456]);
+		expect(insertCall[1]).toEqual([1, 2, "123456"]);
 	});
 });
 
