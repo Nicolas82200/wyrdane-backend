@@ -58,7 +58,7 @@ const expireStaleForRecipient = async (recipientId: number): Promise<void> => {
 const createInvite = async (
 	senderId: number,
 	recipientId: number,
-	steamLobbyId: number,
+	steamLobbyId: string,
 ): Promise<CreateInviteResult> => {
 	const friendship = await findFriendship(senderId, recipientId);
 	if (!friendship || friendship.status !== "accepted") return { ok: false, reason: "not_friends" };

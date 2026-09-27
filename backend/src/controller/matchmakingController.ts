@@ -51,9 +51,15 @@ const reportLobbyHandler = async (req: Request, res: Response): Promise<void> =>
 			return;
 		}
 
-		const { steamLobbyId } = req.body as { steamLobbyId?: number };
-		if (typeof steamLobbyId !== "number" || !Number.isFinite(steamLobbyId)) {
-			res.status(400).json({ message: "Payload invalide" });
+		// steamLobbyId doit arriver en STRING : un CSteamID 64 bits ne survit pas
+		// à un number JSON (JSON.parse l'arrondit à ±8 près, l'invité rejoignait
+		// alors un lobby inexistant — voir matchmakingModel.QueueStatusResult).
+		// Un client pas encore mis à jour envoie encore un number : on le refuse
+		// explicitement plutôt que d'enregistrer un id corrompu, l'hôte relance
+		// simplement une recherche.
+		const { steamLobbyId } = req.body as { steamLobbyId?: unknown };
+		if (typeof steamLobbyId !== "string" || !/^[1-9][0-9]{0,19}$/.test(steamLobbyId)) {
+			res.status(400).json({ message: "steamLobbyId invalide (chaîne de chiffres attendue)" });
 			return;
 		}
 

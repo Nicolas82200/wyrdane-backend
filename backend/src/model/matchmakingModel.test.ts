@@ -400,7 +400,10 @@ describe("matchmakingModel", () => {
 			expect(result).toEqual({ status: "waiting", mmr: 1234, window: 150, elapsed_seconds: 20 });
 		});
 
-		it("reports the guest's steam_lobby_id once matched", async () => {
+		// L'id est renvoyé en string, sans repasser par un number : le CSteamID
+		// 64 bits 109775241000123456 devenait 109775241000123460 en double, et
+		// l'invité rejoignait un lobby inexistant (Steam code 2).
+		it("reports the guest's steam_lobby_id as an exact string once matched", async () => {
 			const matchedTicket: TicketRow = {
 				id: 1,
 				ticket_id: "t1",
@@ -423,7 +426,7 @@ describe("matchmakingModel", () => {
 				status: "matched",
 				role: "guest",
 				opponent_id: 2,
-				steam_lobby_id: 109775241000123456,
+				steam_lobby_id: "109775241000123456",
 				match_id: "match-abc",
 				match_session_token: "mock-session-token",
 			});
@@ -448,7 +451,7 @@ describe("matchmakingModel", () => {
 			const connection = makeConnection(guestTicket, []);
 			mockedDb.getConnection.mockResolvedValueOnce(connection);
 
-			const ok = await reportLobby(1, "t1", 109775241000123456);
+			const ok = await reportLobby(1, "t1", "109775241000123456");
 
 			expect(ok).toBe(false);
 			expect(connection.rollback).toHaveBeenCalledTimes(1);
@@ -471,16 +474,16 @@ describe("matchmakingModel", () => {
 			const connection = makeConnection(hostTicket, []);
 			mockedDb.getConnection.mockResolvedValueOnce(connection);
 
-			const ok = await reportLobby(1, "t1", 109775241000123456);
+			const ok = await reportLobby(1, "t1", "109775241000123456");
 
 			expect(ok).toBe(true);
 			expect(findUpdate(connection, (sql) => sql === "UPDATE matchmaking_tickets SET steam_lobby_id = ? WHERE id = ?")).toEqual([
-				109775241000123456,
+				"109775241000123456",
 				1,
 			]);
 			expect(
 				findUpdate(connection, (sql) => sql === "UPDATE matchmaking_tickets SET steam_lobby_id = ? WHERE user_id = ? AND opponent_id = ?"),
-			).toEqual([109775241000123456, 2, 1]);
+			).toEqual(["109775241000123456", 2, 1]);
 			expect(connection.commit).toHaveBeenCalledTimes(1);
 		});
 	});

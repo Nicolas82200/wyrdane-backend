@@ -44,13 +44,21 @@ interface TicketRow extends RowDataPacket {
 	created_at: string;
 }
 
+// steam_lobby_id est transporté en STRING, jamais en number : un id de lobby
+// Steam est un CSteamID 64 bits (ex. 109775243137628014, 57 bits significatifs)
+// et un double n'en garde que 53. Sérialisé en nombre JSON, il était arrondi à
+// ±8 près (JSON.parse côté Node à l'aller, JSON.parse côté Godot au retour) :
+// l'invité rejoignait un lobby voisin inexistant et Steam refusait l'entrée
+// avec le code 2 (k_EChatRoomEnterResponseDoesntExist), les deux joueurs
+// repartant en boucle de matchmaking. La colonne est un BIGINT et mysql2 le
+// renvoie déjà en string : on le laisse tel quel de bout en bout.
 type QueueStatusResult =
 	| { status: "waiting"; mmr: number; window: number; elapsed_seconds: number }
 	| {
 			status: "matched";
 			role: "host" | "guest";
 			opponent_id: number;
-			steam_lobby_id?: number;
+			steam_lobby_id?: string;
 			match_id: string;
 			match_session_token: string;
 	  }
@@ -188,7 +196,7 @@ const toStatusResult = (ticket: TicketRow): QueueStatusResult => {
 			status: "matched",
 			role: ticket.role as "host" | "guest",
 			opponent_id: ticket.opponent_id as number,
-			steam_lobby_id: ticket.steam_lobby_id ? Number(ticket.steam_lobby_id) : undefined,
+			steam_lobby_id: ticket.steam_lobby_id ?? undefined,
 			match_id: ticket.match_id as string,
 			match_session_token: ticket.match_session_token as string,
 		};
@@ -256,7 +264,9 @@ const getQueueStatus = async (userId: number, ticketId: string): Promise<QueueSt
 // prochain poll pour rejoindre le lobby (voir getQueueStatus/toStatusResult).
 // Renvoie false si l'appelant n'est pas l'hôte confirmé de ce ticket
 // (ticket introuvable, pas le sien, pas encore matched, ou role != host).
-const reportLobby = async (userId: number, ticketId: string, steamLobbyId: number): Promise<boolean> => {
+// steamLobbyId est une chaîne de chiffres (voir QueueStatusResult) : le
+// contrôleur la valide avant d'arriver ici, elle part telle quelle en BIGINT.
+const reportLobby = async (userId: number, ticketId: string, steamLobbyId: string): Promise<boolean> => {
 	const connection = await db.getConnection();
 	try {
 		await connection.beginTransaction();

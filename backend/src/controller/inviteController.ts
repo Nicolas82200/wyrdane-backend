@@ -13,11 +13,18 @@ const create = async (req: Request, res: Response): Promise<void> => {
 			res.status(401).json({ message: "Non authentifié" });
 			return;
 		}
-		const body = req.body as { recipientId?: number; steamLobbyId?: number };
+		// steamLobbyId arrive en STRING : un CSteamID 64 bits ne survit pas à un
+		// number JSON (arrondi à ±8 près, le destinataire rejoignait un lobby
+		// inexistant — voir matchmakingModel.QueueStatusResult).
+		const body = req.body as { recipientId?: number; steamLobbyId?: unknown };
 		const recipientId = Number(body.recipientId);
-		const steamLobbyId = Number(body.steamLobbyId);
-		if (!Number.isInteger(recipientId) || recipientId <= 0 || !Number.isInteger(steamLobbyId) || steamLobbyId <= 0) {
-			res.status(400).json({ message: "recipientId/steamLobbyId invalide" });
+		const steamLobbyId = body.steamLobbyId;
+		if (!Number.isInteger(recipientId) || recipientId <= 0) {
+			res.status(400).json({ message: "recipientId invalide" });
+			return;
+		}
+		if (typeof steamLobbyId !== "string" || !/^[1-9][0-9]{0,19}$/.test(steamLobbyId)) {
+			res.status(400).json({ message: "steamLobbyId invalide (chaîne de chiffres attendue)" });
 			return;
 		}
 		if (recipientId === userId) {
@@ -91,7 +98,9 @@ const respond = (accept: boolean) => async (req: Request, res: Response): Promis
 			res.status(404).json({ message: "Invitation introuvable ou expirée" });
 			return;
 		}
-		res.status(200).json({ status: invite.status, steamLobbyId: Number(invite.steam_lobby_id) });
+		// steam_lobby_id reste une string (BIGINT renvoyé tel quel par mysql2) :
+		// un Number() ici corromprait l'id juste avant que le client rejoigne.
+		res.status(200).json({ status: invite.status, steamLobbyId: invite.steam_lobby_id });
 	} catch (error) {
 		console.error(error);
 		res.status(500).json({ message: "Server error" });
