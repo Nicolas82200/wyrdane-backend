@@ -98,9 +98,21 @@ const pairingScore = (ticket: TicketRow, candidate: TicketRow): number =>
 // meilleur au sens de pairingScore (MMR le plus proche, corrigé de
 // l'ancienneté) — et non plus le premier venu.
 const findOpponent = async (connection: PoolConnection, ticket: TicketRow): Promise<TicketRow | null> => {
+	// La borne sur created_at est indispensable : un ticket ne passe en 'expired'
+	// que si SON propre propriétaire le poll (voir getQueueStatus), donc un joueur
+	// qui ferme le jeu ou perd le réseau laisse un ticket 'waiting' appariable
+	// INDÉFINIMENT. On s'appariait alors à un fantôme : l'hôte créait un lobby et
+	// attendait HOST_PEER_WAIT_TIMEOUT dans le vide, l'invité repollait un
+	// steam_lobby_id qui n'arrivait jamais. Le filtre est fait en SQL avec l'heure
+	// du serveur MySQL (même référence que le CURRENT_TIMESTAMP qui écrit
+	// created_at), et non avec elapsedSeconds, qui compare Date.now() côté Node à
+	// une date écrite côté base.
 	const [candidates] = await connection.query<TicketRow[]>(
-		"SELECT * FROM matchmaking_tickets WHERE status = 'waiting' AND mode = ? AND user_id != ? ORDER BY created_at ASC FOR UPDATE",
-		[ticket.mode, ticket.user_id],
+		`SELECT * FROM matchmaking_tickets
+		 WHERE status = 'waiting' AND mode = ? AND user_id != ?
+		   AND created_at > DATE_SUB(NOW(), INTERVAL ? SECOND)
+		 ORDER BY created_at ASC FOR UPDATE`,
+		[ticket.mode, ticket.user_id, TICKET_EXPIRY_SECONDS],
 	);
 	const myWindow = windowFor(elapsedSeconds(ticket.created_at));
 	let best: TicketRow | null = null;
@@ -128,6 +140,16 @@ const findOpponent = async (connection: PoolConnection, ticket: TicketRow): Prom
 // joueurs qui se retrouvent régulièrement (ex. entre amis) tombaient TOUJOURS
 // sur le même hôte, l'autre ne pouvant jamais héberger — corrigé sur demande
 // explicite (voir aussi card-game CLAUDE.md, section matchmaking).
+// steam_lobby_id est remis à NULL sur les DEUX tickets, et ce n'est PAS
+// cosmétique : la table ne garde qu'une ligne par joueur (UNIQUE KEY user_id,
+// réutilisée par le ON DUPLICATE KEY UPDATE de joinQueue), donc un ticket
+// ré-apparié conservait le lobby du match PRÉCÉDENT — déjà quitté par son
+// hôte. toStatusResult le renvoyait dès status='matched', sans vérifier qu'il
+// appartient au match courant : l'invité rejoignait un lobby mort et Steam
+// refusait l'entrée en code 2 (k_EChatRoomEnterResponseDoesntExist) avant même
+// que le nouvel hôte ait créé le sien. Symptôme observé dans les logs : côté
+// invité un unique « Adversaire trouvé » immédiatement suivi du joinLobby,
+// impossible si l'id venait d'être rapporté par l'hôte.
 const pairTickets = async (connection: PoolConnection, ticket: TicketRow, opponent: TicketRow): Promise<void> => {
 	const hostId = Math.random() < 0.5 ? ticket.user_id : opponent.user_id;
 	// matchId/jeton émis une seule fois ici, à l'appariement réel côté serveur
@@ -137,11 +159,11 @@ const pairTickets = async (connection: PoolConnection, ticket: TicketRow, oppone
 	const matchId = randomUUID();
 	const matchSessionToken = issueMatchSessionToken(matchId, ticket.user_id, opponent.user_id);
 	await connection.query(
-		"UPDATE matchmaking_tickets SET status = 'matched', opponent_id = ?, role = ?, match_id = ?, match_session_token = ? WHERE id = ?",
+		"UPDATE matchmaking_tickets SET status = 'matched', steam_lobby_id = NULL, opponent_id = ?, role = ?, match_id = ?, match_session_token = ? WHERE id = ?",
 		[opponent.user_id, ticket.user_id === hostId ? "host" : "guest", matchId, matchSessionToken, ticket.id],
 	);
 	await connection.query(
-		"UPDATE matchmaking_tickets SET status = 'matched', opponent_id = ?, role = ?, match_id = ?, match_session_token = ? WHERE id = ?",
+		"UPDATE matchmaking_tickets SET status = 'matched', steam_lobby_id = NULL, opponent_id = ?, role = ?, match_id = ?, match_session_token = ? WHERE id = ?",
 		[ticket.user_id, opponent.user_id === hostId ? "host" : "guest", matchId, matchSessionToken, opponent.id],
 	);
 };
@@ -281,9 +303,68 @@ const reportLobby = async (userId: number, ticketId: string, steamLobbyId: strin
 			return false;
 		}
 		await connection.query("UPDATE matchmaking_tickets SET steam_lobby_id = ? WHERE id = ?", [steamLobbyId, ticket.id]);
+		// Le ticket de l'invité n'est mis à jour que s'il est ENCORE sur CE match :
+		// sans les gardes status/match_id, un réessai tardif de report-lobby (voir
+		// RANKED_REPORT_LOBBY_MAX_ATTEMPTS côté client) écrivait un lobby déjà quitté
+		// sur le ticket d'un adversaire entre-temps ré-apparié ailleurs, le condamnant
+		// à un code 2 sur son nouveau match.
 		await connection.query(
-			"UPDATE matchmaking_tickets SET steam_lobby_id = ? WHERE user_id = ? AND opponent_id = ?",
-			[steamLobbyId, ticket.opponent_id, ticket.user_id],
+			`UPDATE matchmaking_tickets SET steam_lobby_id = ?
+			 WHERE user_id = ? AND opponent_id = ? AND status = 'matched' AND match_id = ?`,
+			[steamLobbyId, ticket.opponent_id, ticket.user_id, ticket.match_id],
+		);
+		await connection.commit();
+		return true;
+	} catch (error) {
+		await connection.rollback();
+		throw error;
+	} finally {
+		connection.release();
+	}
+};
+
+// Abandonne un appariement qui n'a pas abouti et remet les DEUX tickets en
+// file, en une transaction. C'est le correctif du défaut structurel : jusqu'ici,
+// un invité dont l'entrée en lobby échouait se remettait en file TOUT SEUL
+// (joinQueue), alors que son hôte restait 'matched' pendant tout son
+// HOST_PEER_WAIT_TIMEOUT (60 s). Or findOpponent n'apparie que des tickets
+// 'waiting' : les deux joueurs étaient donc structurellement incapables de se
+// retrouver pendant une minute, et le client abandonnait bien avant
+// (MAX_AUTO_JOIN_RETRIES). En invalidant l'appariement des deux côtés d'un seul
+// coup, ils repartent ensemble et se réapparient au poll suivant — avec un
+// match_id neuf et un steam_lobby_id vierge (voir pairTickets), donc un lobby
+// frais créé par le nouvel hôte.
+//
+// created_at est réinitialisé volontairement : un ticket qui garderait son
+// ancienneté serait aussitôt écarté par la borne d'expiration de findOpponent
+// (et marqué 'expired' par getQueueStatus). La contrepartie est que la fenêtre
+// de MMR repart à WINDOW_BASE_MMR, ce qui est sans effet entre deux joueurs
+// déjà jugés compatibles.
+//
+// Renvoie false si l'appelant n'est pas le propriétaire d'un ticket réellement
+// apparié (rien à abandonner) — le client retombe alors sur un joinQueue normal.
+const abandonMatch = async (userId: number, ticketId: string): Promise<boolean> => {
+	const connection = await db.getConnection();
+	try {
+		await connection.beginTransaction();
+		const [rows] = await connection.query<TicketRow[]>(
+			"SELECT * FROM matchmaking_tickets WHERE ticket_id = ? FOR UPDATE",
+			[ticketId],
+		);
+		const ticket = rows[0];
+		if (!ticket || ticket.user_id !== userId || ticket.status !== "matched" || !ticket.match_id) {
+			await connection.rollback();
+			return false;
+		}
+		// Les deux tickets du match, désignés par match_id : on ne touche jamais un
+		// ticket que l'adversaire aurait déjà relancé de son côté (son match_id aurait
+		// changé), ce qui rend l'appel idempotent et sans effet de bord croisé.
+		await connection.query(
+			`UPDATE matchmaking_tickets
+			 SET status = 'waiting', steam_lobby_id = NULL, opponent_id = NULL, role = NULL,
+			     match_id = NULL, match_session_token = NULL, created_at = CURRENT_TIMESTAMP
+			 WHERE match_id = ?`,
+			[ticket.match_id],
 		);
 		await connection.commit();
 		return true;
@@ -307,5 +388,5 @@ const cancelQueue = async (userId: number, ticketId: string): Promise<void> => {
 	);
 };
 
-export { joinQueue, getQueueStatus, reportLobby, cancelQueue };
+export { joinQueue, getQueueStatus, reportLobby, abandonMatch, cancelQueue };
 export type { QueueMode };

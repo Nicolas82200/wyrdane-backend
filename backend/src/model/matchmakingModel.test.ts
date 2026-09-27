@@ -20,7 +20,7 @@ vi.mock("../helper/matchSessionToken", () => ({
 
 import db from "./db";
 import { getStats } from "./rankedModel";
-import { joinQueue, getQueueStatus, reportLobby, cancelQueue } from "./matchmakingModel";
+import { joinQueue, getQueueStatus, reportLobby, abandonMatch, cancelQueue } from "./matchmakingModel";
 
 const mockedDb = db as unknown as { query: ReturnType<typeof vi.fn>; getConnection: ReturnType<typeof vi.fn> };
 const mockedGetStats = getStats as unknown as ReturnType<typeof vi.fn>;
@@ -330,6 +330,51 @@ describe("matchmakingModel", () => {
 		});
 	});
 
+	// Régressions du rendez-vous Steam : les deux causes pour lesquelles deux amis
+	// n'arrivaient plus à entrer en partie ensemble (code 2 en boucle).
+	describe("rendezvous safety", () => {
+		it("clears any inherited steam_lobby_id when pairing", async () => {
+			mockedGetStats.mockResolvedValueOnce({ mmr: 1000 });
+			vi.spyOn(Math, "random").mockReturnValue(0.1);
+			// Ticket réutilisé (UNIQUE KEY user_id) portant encore le lobby du match
+			// précédent : sans purge, l'invité le relisait et rejoignait un lobby mort.
+			const myTicket: TicketRow = {
+				...waitingTicket(1, 1000),
+				steam_lobby_id: "109775243148705323",
+			};
+			const connection = makeConnection(myTicket, [waitingTicket(2, 1010)]);
+			mockedDb.getConnection.mockResolvedValueOnce(connection);
+
+			await joinQueue(1, "normal");
+
+			const pairingSql = connection.query.mock.calls
+				.map(([sql]) => sql)
+				.filter((sql): sql is string => typeof sql === "string" && sql.includes("status = 'matched'"));
+			expect(pairingSql.length).toBe(2);
+			for (const sql of pairingSql) expect(sql).toContain("steam_lobby_id = NULL");
+		});
+
+		it("never pairs with a ticket older than the expiry window", async () => {
+			mockedGetStats.mockResolvedValueOnce({ mmr: 1000 });
+			const connection = makeConnection(waitingTicket(1, 1000), []);
+			mockedDb.getConnection.mockResolvedValueOnce(connection);
+
+			await joinQueue(1, "normal");
+
+			// Un ticket ne passe 'expired' que si son propriétaire le poll : la borne
+			// doit donc être dans le SQL, sinon un joueur qui a fermé le jeu reste
+			// appariable indéfiniment.
+			const candidateCall = connection.query.mock.calls.find(
+				([sql]) => typeof sql === "string" && sql.includes("user_id != ?"),
+			);
+			expect(candidateCall?.[0]).toContain("created_at > DATE_SUB(NOW(), INTERVAL ? SECOND)");
+			// Le mode vient de la ligne en base (waitingTicket ne le simule pas) : ce qui
+			// compte ici est l'exclusion de soi-même et la borne d'expiration passée en
+			// paramètre, soit TICKET_EXPIRY_SECONDS.
+			expect(candidateCall?.[1]?.slice(1)).toEqual([1, 300]);
+		});
+	});
+
 	describe("getQueueStatus", () => {
 		it("returns expired for a ticket that does not belong to the caller", async () => {
 			const otherTicket: TicketRow = {
@@ -467,8 +512,8 @@ describe("matchmakingModel", () => {
 				opponent_id: 2,
 				role: "host",
 				steam_lobby_id: null,
-				match_id: null,
-				match_session_token: null,
+				match_id: "match-abc",
+				match_session_token: "mock-session-token",
 				created_at: NOW.toISOString(),
 			};
 			const connection = makeConnection(hostTicket, []);
@@ -481,10 +526,78 @@ describe("matchmakingModel", () => {
 				"109775241000123456",
 				1,
 			]);
+			// Le ticket de l'invité n'est touché que s'il est encore sur CE match :
+			// les gardes status/match_id empêchent un réessai tardif d'écrire un lobby
+			// périmé sur un adversaire déjà ré-apparié ailleurs.
 			expect(
-				findUpdate(connection, (sql) => sql === "UPDATE matchmaking_tickets SET steam_lobby_id = ? WHERE user_id = ? AND opponent_id = ?"),
-			).toEqual(["109775241000123456", 2, 1]);
+				findUpdate(connection, (sql) =>
+					sql.includes("WHERE user_id = ? AND opponent_id = ? AND status = 'matched' AND match_id = ?"),
+				),
+			).toEqual(["109775241000123456", 2, 1, "match-abc"]);
 			expect(connection.commit).toHaveBeenCalledTimes(1);
+		});
+	});
+
+	describe("abandonMatch", () => {
+		const matchedTicket = (role: string): TicketRow => ({
+			id: 1,
+			ticket_id: "t1",
+			user_id: 1,
+			mmr: 1000,
+			status: "matched",
+			opponent_id: 2,
+			role,
+			steam_lobby_id: "109775241000123456",
+			match_id: "match-abc",
+			match_session_token: "mock-session-token",
+			created_at: NOW.toISOString(),
+		});
+
+		// Le point du correctif : les DEUX tickets repartent en file d'un seul coup.
+		// Avant, seul celui qui échouait se remettait en file et son adversaire
+		// restait 'matched' (donc non appariable) pendant tout son
+		// HOST_PEER_WAIT_TIMEOUT — ils ne pouvaient plus se retrouver.
+		it("puts both tickets of the match back in the queue", async () => {
+			const connection = makeConnection(matchedTicket("guest"), []);
+			mockedDb.getConnection.mockResolvedValueOnce(connection);
+
+			const ok = await abandonMatch(1, "t1");
+
+			expect(ok).toBe(true);
+			const params = findUpdate(connection, (sql) => sql.includes("WHERE match_id = ?"));
+			expect(params).toEqual(["match-abc"]);
+			// Purge complète : un lobby résiduel rejouerait exactement le bug d'origine.
+			const sql = connection.query.mock.calls.find(
+				([text]) => typeof text === "string" && text.includes("WHERE match_id = ?"),
+			)?.[0] as string;
+			expect(sql).toContain("status = 'waiting'");
+			expect(sql).toContain("steam_lobby_id = NULL");
+			expect(sql).toContain("match_id = NULL");
+			expect(sql).toContain("created_at = CURRENT_TIMESTAMP");
+			expect(connection.commit).toHaveBeenCalledTimes(1);
+		});
+
+		it("refuses a ticket that is not matched and changes nothing", async () => {
+			const waiting = waitingTicket(1, 1000);
+			const connection = makeConnection(waiting, []);
+			mockedDb.getConnection.mockResolvedValueOnce(connection);
+
+			const ok = await abandonMatch(1, "t1");
+
+			expect(ok).toBe(false);
+			expect(findUpdate(connection, (sql) => sql.includes("WHERE match_id = ?"))).toBeUndefined();
+			expect(connection.rollback).toHaveBeenCalledTimes(1);
+		});
+
+		it("refuses a ticket that belongs to someone else", async () => {
+			const connection = makeConnection(matchedTicket("host"), []);
+			mockedDb.getConnection.mockResolvedValueOnce(connection);
+
+			const ok = await abandonMatch(999, "t1");
+
+			expect(ok).toBe(false);
+			expect(findUpdate(connection, (sql) => sql.includes("WHERE match_id = ?"))).toBeUndefined();
+			expect(connection.rollback).toHaveBeenCalledTimes(1);
 		});
 	});
 
