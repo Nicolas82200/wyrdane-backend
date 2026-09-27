@@ -1,6 +1,6 @@
 import { Request, Response } from "express";
 
-import { joinQueue, getQueueStatus, reportLobby, cancelQueue } from "../model/matchmakingModel";
+import { joinQueue, getQueueStatus, reportLobby, abandonMatch, cancelQueue } from "../model/matchmakingModel";
 import type { QueueMode } from "../model/matchmakingModel";
 import { getUserId } from "../helper/requestUser";
 import { isValidLobbyId } from "../helper/steamLobbyId";
@@ -76,6 +76,27 @@ const reportLobbyHandler = async (req: Request, res: Response): Promise<void> =>
 	}
 };
 
+// Appelé par le client quand un appariement n'a pas pu se concrétiser (entrée
+// en lobby Steam refusée, hôte jamais rejoint) : remet les DEUX joueurs en file
+// plutôt que de laisser chacun décider seul — voir abandonMatch pour le détail
+// du blocage que ça corrige. 204 même quand il n'y avait rien à abandonner : le
+// client n'a aucune action différente à mener dans ce cas, il se remet en file.
+const abandonMatchHandler = async (req: Request, res: Response): Promise<void> => {
+	try {
+		const userId = getUserId(req);
+		if (!userId) {
+			res.status(401).json({ message: "Non authentifié" });
+			return;
+		}
+
+		await abandonMatch(userId, String(req.params.ticketId));
+		res.status(204).end();
+	} catch (error) {
+		console.error(error);
+		res.status(500).json({ message: "Server error" });
+	}
+};
+
 const cancelQueueHandler = async (req: Request, res: Response): Promise<void> => {
 	try {
 		const userId = getUserId(req);
@@ -92,4 +113,4 @@ const cancelQueueHandler = async (req: Request, res: Response): Promise<void> =>
 	}
 };
 
-export { joinQueueHandler, getQueueStatusHandler, reportLobbyHandler, cancelQueueHandler };
+export { joinQueueHandler, getQueueStatusHandler, reportLobbyHandler, abandonMatchHandler, cancelQueueHandler };

@@ -8,7 +8,13 @@ import { findFriendship, ONLINE_WINDOW_SECONDS } from "./friendModel";
 // court : contrairement au matchmaking (adversaire anonyme, patience plus
 // longue), il s'agit ici d'inviter un ami précis censé être en ligne au moment
 // de l'invitation — voir card-game CLAUDE.md « Amis et chat ».
-const INVITE_EXPIRY_SECONDS = 45;
+//
+// DOIT rester STRICTEMENT SUPÉRIEUR à OUTGOING_INVITE_TIMEOUT côté client
+// (MatchmakingOverlay.gd, 50 s) : à 45 s, le serveur expirait l'invitation AVANT
+// que l'expéditeur ne renonce, et un destinataire qui acceptait dans cette
+// fenêtre (son poll ne tourne que toutes les INCOMING_INVITE_POLL_INTERVAL = 4 s)
+// se voyait refuser une invitation que l'UI affichait encore comme valide.
+const INVITE_EXPIRY_SECONDS = 60;
 
 type InviteStatus = "pending" | "accepted" | "declined" | "cancelled" | "expired";
 

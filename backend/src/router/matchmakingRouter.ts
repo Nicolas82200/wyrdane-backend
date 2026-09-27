@@ -4,6 +4,7 @@ import {
 	joinQueueHandler,
 	getQueueStatusHandler,
 	reportLobbyHandler,
+	abandonMatchHandler,
 	cancelQueueHandler,
 } from "../controller/matchmakingController";
 import rateLimit from "../middleware/rateLimit";
@@ -17,6 +18,7 @@ router.post(
 );
 router.get("/queue/:ticketId", getQueueStatusHandler);
 router.post("/queue/:ticketId/report-lobby", reportLobbyHandler);
+router.post("/queue/:ticketId/abandon", abandonMatchHandler);
 router.delete("/queue/:ticketId", cancelQueueHandler);
 
 export default router;
