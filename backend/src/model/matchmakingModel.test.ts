@@ -37,6 +37,7 @@ interface TicketRow {
 	match_id: string | null;
 	match_session_token: string | null;
 	created_at: string;
+	last_seen_at?: string;
 }
 
 const NOW = new Date("2026-09-06T12:00:00Z");
@@ -45,7 +46,9 @@ const NOW = new Date("2026-09-06T12:00:00Z");
 // renvoie [ownTicket], celui listant les tickets 'waiting' des autres joueurs
 // renvoie candidateRows ; tout le reste (INSERT/UPDATE) répond un succès
 // générique inspecté ensuite via connection.query.mock.calls.
-const makeConnection = (ownTicket: TicketRow | null, candidateRows: TicketRow[] = []) => {
+// steamId : valeur renvoyée par la jointure linked_accounts (identité de
+// rendez-vous P2P, voir fetchSteamId côté modèle). null = compte sans SteamID lié.
+const makeConnection = (ownTicket: TicketRow | null, candidateRows: TicketRow[] = [], steamId: string | null = null) => {
 	const connection = {
 		query: vi.fn(),
 		beginTransaction: vi.fn(),
@@ -55,6 +58,10 @@ const makeConnection = (ownTicket: TicketRow | null, candidateRows: TicketRow[] 
 	};
 	connection.query.mockImplementation((sql: unknown) => {
 		if (typeof sql !== "string") return Promise.resolve([[]]);
+		// Avant les branches génériques : ce SELECT contient lui aussi "user_id = ?".
+		if (sql.includes("linked_accounts")) {
+			return Promise.resolve([steamId === null ? [] : [{ external_id: steamId }]]);
+		}
 		if (sql.includes("user_id != ?")) return Promise.resolve([candidateRows]);
 		if (sql.includes("WHERE user_id = ?") || sql.includes("WHERE ticket_id = ?") || sql.includes("WHERE id = ?")) {
 			return Promise.resolve([ownTicket ? [ownTicket] : []]);
@@ -79,6 +86,7 @@ const waitingTicket = (id: number, mmr: number, createdAtOffsetSeconds = 0): Tic
 	match_id: null,
 	match_session_token: null,
 	created_at: new Date(NOW.getTime() + createdAtOffsetSeconds * 1000).toISOString(),
+	last_seen_at: NOW.toISOString(),
 });
 
 const findUpdate = (connection: { query: ReturnType<typeof vi.fn> }, predicate: (sql: string, params: unknown[]) => boolean) =>
@@ -368,10 +376,13 @@ describe("matchmakingModel", () => {
 				([sql]) => typeof sql === "string" && sql.includes("user_id != ?"),
 			);
 			expect(candidateCall?.[0]).toContain("created_at > DATE_SUB(NOW(), INTERVAL ? SECOND)");
+			// Seconde borne, celle qui écarte réellement un joueur parti : il ne suffit
+			// pas que son ticket soit récent, il faut qu'il l'ait pollé récemment.
+			expect(candidateCall?.[0]).toContain("last_seen_at > DATE_SUB(NOW(), INTERVAL ? SECOND)");
 			// Le mode vient de la ligne en base (waitingTicket ne le simule pas) : ce qui
-			// compte ici est l'exclusion de soi-même et la borne d'expiration passée en
-			// paramètre, soit TICKET_EXPIRY_SECONDS.
-			expect(candidateCall?.[1]?.slice(1)).toEqual([1, 300]);
+			// compte ici est l'exclusion de soi-même, la borne d'expiration
+			// (TICKET_EXPIRY_SECONDS) et la borne de vivacité (CANDIDATE_LIVENESS_SECONDS).
+			expect(candidateCall?.[1]?.slice(1)).toEqual([1, 300, 12]);
 		});
 	});
 
@@ -609,6 +620,105 @@ describe("matchmakingModel", () => {
 				"UPDATE matchmaking_tickets SET status = 'cancelled' WHERE ticket_id = ? AND user_id = ? AND status = 'waiting'",
 				["t1", 1],
 			);
+		});
+	});
+
+	// Le rendez-vous ne passe plus par un lobby Steam publié après coup : le
+	// backend renvoie directement le SteamID64 de l'adversaire, seule adresse dont
+	// les deux clients ont besoin pour ouvrir leur connexion P2P (voir
+	// SteamTransport côté card-game). Ces tests verrouillent ce contrat.
+	describe("rendez-vous par identité Steam", () => {
+		const pairedTicket = (): TicketRow => ({
+			id: 1,
+			ticket_id: "t1",
+			user_id: 1,
+			mmr: 1000,
+			status: "matched",
+			opponent_id: 2,
+			role: "guest",
+			steam_lobby_id: null,
+			match_id: "m-1",
+			match_session_token: "tok",
+			created_at: NOW.toISOString(),
+			last_seen_at: NOW.toISOString(),
+		});
+
+		it("renvoie le SteamID64 de l'adversaire sur un ticket apparié", async () => {
+			const connection = makeConnection(pairedTicket(), [], "76561198000000001");
+			mockedDb.getConnection.mockResolvedValueOnce(connection);
+
+			const result = await getQueueStatus(1, "t1");
+
+			expect(result).toMatchObject({
+				status: "matched",
+				role: "guest",
+				opponent_steam_id: "76561198000000001",
+			});
+		});
+
+		it("laisse opponent_steam_id absent si l'adversaire n'a pas de compte Steam lié", async () => {
+			// Cas réel : un compte créé côté site n'a pas forcément de SteamID. Le
+			// client doit pouvoir le constater et rendre l'appariement, plutôt que de
+			// tenter une connexion P2P vers une identité nulle.
+			const connection = makeConnection(pairedTicket(), [], null);
+			mockedDb.getConnection.mockResolvedValueOnce(connection);
+
+			const result = await getQueueStatus(1, "t1");
+
+			expect((result as { opponent_steam_id?: string }).opponent_steam_id).toBeUndefined();
+		});
+
+		it("enregistre le poll comme signe de vie du ticket", async () => {
+			const connection = makeConnection(waitingTicket(1, 1000), []);
+			mockedDb.getConnection.mockResolvedValueOnce(connection);
+
+			await getQueueStatus(1, "t1");
+
+			expect(findUpdate(connection, (sql) => sql.includes("SET last_seen_at = NOW()"))).toEqual([1]);
+		});
+	});
+
+	// Relancer une recherche alors qu'on était déjà apparié doit libérer
+	// l'adversaire côté serveur : le client appelle bien /abandon, mais les deux
+	// requêtes HTTP sont indépendantes et rien ne garantit leur ordre d'arrivée.
+	describe("joinQueue libère un appariement mort", () => {
+		it("remet l'adversaire en file quand le ticket remplacé était apparié", async () => {
+			mockedGetStats.mockResolvedValueOnce({ mmr: 1000 });
+			const previous: TicketRow = {
+				id: 1,
+				ticket_id: "t1",
+				user_id: 1,
+				mmr: 1000,
+				status: "matched",
+				opponent_id: 2,
+				role: "host",
+				steam_lobby_id: null,
+				match_id: "m-dead",
+				match_session_token: "tok",
+				created_at: NOW.toISOString(),
+				last_seen_at: NOW.toISOString(),
+			};
+			const connection = makeConnection(previous, []);
+			mockedDb.getConnection.mockResolvedValueOnce(connection);
+
+			await joinQueue(1, "normal");
+
+			// Ciblé par match_id, et jamais sur notre propre ligne (que l'INSERT ...
+			// ON DUPLICATE écrase juste après de toute façon).
+			expect(findUpdate(connection, (sql) => sql.includes("WHERE match_id = ? AND user_id != ?"))).toEqual([
+				"m-dead",
+				1,
+			]);
+		});
+
+		it("ne touche à rien quand le ticket remplacé était simplement en attente", async () => {
+			mockedGetStats.mockResolvedValueOnce({ mmr: 1000 });
+			const connection = makeConnection(waitingTicket(1, 1000), []);
+			mockedDb.getConnection.mockResolvedValueOnce(connection);
+
+			await joinQueue(1, "normal");
+
+			expect(findUpdate(connection, (sql) => sql.includes("WHERE match_id = ? AND user_id != ?"))).toBeUndefined();
 		});
 	});
 });

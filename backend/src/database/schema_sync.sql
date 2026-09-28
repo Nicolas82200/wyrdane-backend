@@ -90,6 +90,11 @@ CREATE TABLE IF NOT EXISTS matchmaking_tickets (
   match_id VARCHAR(36) NULL,
   match_session_token TEXT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  -- Dernier poll du propriétaire (GET /queue/:ticketId). Un ticket ne passe
+  -- 'expired' que si son PROPRE joueur le poll, donc un joueur qui ferme le jeu
+  -- laisserait sinon un ticket 'waiting' appariable indéfiniment : findOpponent
+  -- n'accepte que les candidats vus récemment (voir matchmakingModel.ts).
+  last_seen_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
   UNIQUE KEY unique_ticket_id (ticket_id),
   UNIQUE KEY unique_user_ticket (user_id),
