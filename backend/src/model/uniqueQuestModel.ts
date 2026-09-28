@@ -55,12 +55,12 @@ const RANK_TIER_MMR_THRESHOLDS: Record<RankTierName, number> = {
 // Récompense par palier de rang : progression régulière jusqu'à Légende
 // (1000 or + 5 packs), le plus haut palier atteignable en classé.
 const RANK_TIER_REWARDS: Record<RankTierName, { currency: number; pack: number }> = {
-	silver: { currency: 100, pack: 1 },
-	gold: { currency: 250, pack: 1 },
-	platinum: { currency: 400, pack: 2 },
-	diamond: { currency: 600, pack: 3 },
-	master: { currency: 800, pack: 4 },
-	legend: { currency: 1000, pack: 5 },
+	silver: { currency: 100, pack: 0 },
+	gold: { currency: 200, pack: 1 },
+	platinum: { currency: 350, pack: 1 },
+	diamond: { currency: 500, pack: 1 },
+	master: { currency: 700, pack: 2 },
+	legend: { currency: 900, pack: 5 },
 };
 
 const rankTierQuestTemplates = (): UniqueQuestTemplate[] =>
@@ -79,11 +79,11 @@ const rankTierQuestTemplates = (): UniqueQuestTemplate[] =>
 // voir syncNewRowsProgress, qui reporte la progression déjà acquise sur un
 // palier fraîchement ajouté au catalogue.
 const PLAY_MILESTONES: { target: number; currency: number; pack: number }[] = [
-	{ target: 50, currency: 500, pack: 0 },
-	{ target: 100, currency: 700, pack: 0 },
-	{ target: 150, currency: 850, pack: 0 },
-	{ target: 200, currency: 1000, pack: 1 },
-	{ target: 250, currency: 1200, pack: 2 },
+	{ target: 50, currency: 400, pack: 0 },
+	{ target: 100, currency: 600, pack: 0 },
+	{ target: 150, currency: 700, pack: 0 },
+	{ target: 200, currency: 850, pack: 1 },
+	{ target: 250, currency: 1000, pack: 1 },
 ];
 
 const playQuestTemplates = (): UniqueQuestTemplate[] =>
@@ -102,7 +102,7 @@ const raceFirstQuestTemplates = (): UniqueQuestTemplate[] =>
 		objective: "play_race_first" as const,
 		race,
 		target: 1,
-		rewardCurrency: 200,
+		rewardCurrency: 150,
 		rewardPack: 0,
 		descriptionKey: `QUEST_UNIQUE_FIRST_${race.toUpperCase()}`,
 	}));
@@ -113,7 +113,7 @@ const UNIQUE_QUEST_TEMPLATES: UniqueQuestTemplate[] = [
 		code: "first_multirace_win",
 		objective: "win_multirace_first",
 		target: 1,
-		rewardCurrency: 250,
+		rewardCurrency: 200,
 		rewardPack: 0,
 		descriptionKey: "QUEST_UNIQUE_FIRST_MULTIRACE",
 	},
@@ -121,20 +121,20 @@ const UNIQUE_QUEST_TEMPLATES: UniqueQuestTemplate[] = [
 		code: "win_all_races",
 		objective: "win_all_races",
 		target: IMPLEMENTED_RACES.length,
-		rewardCurrency: 500,
+		rewardCurrency: 400,
 		rewardPack: 1,
 		descriptionKey: "QUEST_UNIQUE_WIN_ALL_RACES",
 	},
 	...playQuestTemplates(),
 	...rankTierQuestTemplates(),
 	{ code: "win_10", objective: "win", target: 10, rewardCurrency: 100, rewardPack: 1, descriptionKey: "QUEST_UNIQUE_WIN_10" },
-	{ code: "win_25", objective: "win", target: 25, rewardCurrency: 250, rewardPack: 2, descriptionKey: "QUEST_UNIQUE_WIN_25" },
-	{ code: "win_100", objective: "win", target: 100, rewardCurrency: 1000, rewardPack: 2, descriptionKey: "QUEST_UNIQUE_WIN_100" },
+	{ code: "win_25", objective: "win", target: 25, rewardCurrency: 200, rewardPack: 2, descriptionKey: "QUEST_UNIQUE_WIN_25" },
+	{ code: "win_100", objective: "win", target: 100, rewardCurrency: 900, rewardPack: 1, descriptionKey: "QUEST_UNIQUE_WIN_100" },
 	{
 		code: "win_ranked_10",
 		objective: "win_ranked",
 		target: 10,
-		rewardCurrency: 500,
+		rewardCurrency: 400,
 		rewardPack: 0,
 		descriptionKey: "QUEST_UNIQUE_WIN_RANKED_10",
 	},
@@ -142,7 +142,7 @@ const UNIQUE_QUEST_TEMPLATES: UniqueQuestTemplate[] = [
 		code: "win_ranked_50",
 		objective: "win_ranked",
 		target: 50,
-		rewardCurrency: 1000,
+		rewardCurrency: 900,
 		rewardPack: 3,
 		descriptionKey: "QUEST_UNIQUE_WIN_RANKED_50",
 	},

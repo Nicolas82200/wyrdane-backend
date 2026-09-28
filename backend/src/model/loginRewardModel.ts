@@ -10,13 +10,13 @@ class AlreadyClaimedTodayError extends Error {
 	}
 }
 
-// Récompense croissante sur 7 jours de connexion consécutifs, puis PLATEAU :
-// au-delà du 7e jour la série ne reboucle plus (elle rebouclait jusqu'au
-// 2026-09-28, un joueur fidèle retombait donc à la plus petite récompense au
-// jour 8), chaque jour consécutif supplémentaire verse le palier maximal.
-// Un jour manqué remet le palier à 1. streak_day en base continue de compter
-// le nombre total de jours consécutifs, sans plafond.
-const REWARD_BY_DAY = [50, 75, 100, 125, 150, 175, 200];
+// Récompense croissante sur 5 jours de connexion consécutifs, puis PLATEAU :
+// au-delà du 5e jour la série ne reboucle plus (elle rebouclait sur 7 jours
+// jusqu'au 2026-09-28, un joueur fidèle retombait donc à la plus petite
+// récompense au jour 8), chaque jour consécutif supplémentaire verse le palier
+// maximal. Un jour manqué remet le palier à 1. streak_day en base continue de
+// compter le nombre total de jours consécutifs, sans plafond.
+const REWARD_BY_DAY = [20, 40, 60, 80, 100];
 
 const rewardForDay = (day: number): number =>
 	REWARD_BY_DAY[Math.min(Math.max(day, 1), REWARD_BY_DAY.length) - 1];

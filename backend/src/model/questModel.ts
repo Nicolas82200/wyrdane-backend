@@ -28,7 +28,7 @@ const raceQuestTemplates = (): QuestTemplate[] =>
 			objective: "play_race" as const,
 			race,
 			target: 10,
-			rewardCurrency: 40,
+			rewardCurrency: 50,
 			descriptionKey: `QUEST_PLAY_RACE_${race.toUpperCase()}_10`,
 		},
 		{
@@ -36,17 +36,22 @@ const raceQuestTemplates = (): QuestTemplate[] =>
 			objective: "win_race" as const,
 			race,
 			target: 2,
-			rewardCurrency: 60,
+			rewardCurrency: 75,
 			descriptionKey: `QUEST_WIN_RACE_${race.toUpperCase()}_2`,
 		},
 	]);
 
+// Recompenses calees sur une echelle unique de 25/50/75/100 depuis le
+// 2026-09-28 (auparavant 30/40/50/60/70/80, sans logique apparente entre deux
+// quetes de difficulte voisine) : le palier suit la difficulte reelle -- 25
+// pour la quete qu'une session normale valide sans y penser, 100 pour la seule
+// qui impose de jouer en classe.
 const QUEST_TEMPLATES: QuestTemplate[] = [
-	{ code: "play_3", objective: "play", target: 3, rewardCurrency: 30, descriptionKey: "QUEST_PLAY_3" },
-	{ code: "play_5", objective: "play", target: 5, rewardCurrency: 60, descriptionKey: "QUEST_PLAY_5" },
+	{ code: "play_3", objective: "play", target: 3, rewardCurrency: 25, descriptionKey: "QUEST_PLAY_3" },
+	{ code: "play_5", objective: "play", target: 5, rewardCurrency: 50, descriptionKey: "QUEST_PLAY_5" },
 	{ code: "win_2", objective: "win", target: 2, rewardCurrency: 50, descriptionKey: "QUEST_WIN_2" },
-	{ code: "win_3", objective: "win", target: 3, rewardCurrency: 70, descriptionKey: "QUEST_WIN_3" },
-	{ code: "win_ranked_1", objective: "win_ranked", target: 1, rewardCurrency: 80, descriptionKey: "QUEST_WIN_RANKED_1" },
+	{ code: "win_3", objective: "win", target: 3, rewardCurrency: 75, descriptionKey: "QUEST_WIN_3" },
+	{ code: "win_ranked_1", objective: "win_ranked", target: 1, rewardCurrency: 100, descriptionKey: "QUEST_WIN_RANKED_1" },
 	...raceQuestTemplates(),
 ];
 
