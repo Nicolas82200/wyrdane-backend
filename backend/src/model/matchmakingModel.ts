@@ -28,6 +28,16 @@ const TICKET_EXPIRY_SECONDS = 300;
 const WAIT_BONUS_MMR_PER_SECOND = 5;
 const WAIT_BONUS_MAX_MMR = 300;
 
+// Un ticket n'est appariable que si son propriétaire l'a pollé depuis moins de
+// ce délai. Le client poll toutes les 2 s (RANKED_POLL_INTERVAL côté
+// MatchmakingOverlay) : 12 s tolèrent plusieurs polls manqués (latence, frame
+// bloquée) tout en écartant vite un joueur parti. Indispensable parce qu'un
+// ticket ne passe 'expired' que si son PROPRE propriétaire le poll (voir
+// getQueueStatus) : un joueur qui ferme le jeu laissait sinon un ticket
+// 'waiting' appariable jusqu'à TICKET_EXPIRY_SECONDS, et on l'appariait à un
+// fantôme — l'adversaire attendait alors une connexion qui ne viendrait jamais.
+const CANDIDATE_LIVENESS_SECONDS = 12;
+
 type QueueMode = "ranked" | "normal";
 
 interface TicketRow extends RowDataPacket {
@@ -43,6 +53,7 @@ interface TicketRow extends RowDataPacket {
 	match_id: string | null;
 	match_session_token: string | null;
 	created_at: string;
+	last_seen_at: string;
 }
 
 // steam_lobby_id est transporté en STRING, jamais en number : un id de lobby
@@ -59,6 +70,15 @@ type QueueStatusResult =
 			status: "matched";
 			role: "host" | "guest";
 			opponent_id: number;
+			// SteamID64 de l'adversaire, en chaîne de chiffres : c'est l'ADRESSE de
+			// rendez-vous depuis le 2026-09-28. L'hôte ouvre un socket d'écoute P2P
+			// et n'accepte que cette identité, l'invité s'y connecte directement
+			// (ConnectP2P n'exige ni amitié ni lobby commun). Absent si le compte
+			// adverse n'a pas de SteamID lié — le client rend alors l'appariement.
+			opponent_steam_id?: string;
+			// Conservé pour les clients d'une version antérieure, qui attendent
+			// encore que l'hôte publie un lobby Steam via POST .../report-lobby.
+			// Plus jamais rempli par le client actuel.
 			steam_lobby_id?: string;
 			match_id: string;
 			match_session_token: string;
@@ -98,21 +118,28 @@ const pairingScore = (ticket: TicketRow, candidate: TicketRow): number =>
 // meilleur au sens de pairingScore (MMR le plus proche, corrigé de
 // l'ancienneté) — et non plus le premier venu.
 const findOpponent = async (connection: PoolConnection, ticket: TicketRow): Promise<TicketRow | null> => {
-	// La borne sur created_at est indispensable : un ticket ne passe en 'expired'
-	// que si SON propre propriétaire le poll (voir getQueueStatus), donc un joueur
-	// qui ferme le jeu ou perd le réseau laisse un ticket 'waiting' appariable
-	// INDÉFINIMENT. On s'appariait alors à un fantôme : l'hôte créait un lobby et
-	// attendait HOST_PEER_WAIT_TIMEOUT dans le vide, l'invité repollait un
-	// steam_lobby_id qui n'arrivait jamais. Le filtre est fait en SQL avec l'heure
-	// du serveur MySQL (même référence que le CURRENT_TIMESTAMP qui écrit
-	// created_at), et non avec elapsedSeconds, qui compare Date.now() côté Node à
-	// une date écrite côté base.
+	// DEUX bornes temporelles, toutes deux indispensables, et pour des raisons
+	// différentes :
+	//   - last_seen_at : un ticket ne passe en 'expired' que si SON propre
+	//     propriétaire le poll (voir getQueueStatus), donc un joueur qui ferme le
+	//     jeu ou perd le réseau laisserait un ticket 'waiting' appariable
+	//     indéfiniment. On s'appariait alors à un fantôme, et l'adversaire
+	//     attendait une connexion qui ne venait jamais (jusqu'à
+	//     HOST_PEER_WAIT_TIMEOUT côté client). Seul un joueur qui poll encore est
+	//     candidat.
+	//   - created_at : plafond absolu, pour ne jamais apparier un ticket plus
+	//     ancien que sa propre durée de vie même si son propriétaire s'acharne à
+	//     le poller.
+	// Les deux filtres sont faits en SQL avec l'heure du serveur MySQL (même
+	// référence que le CURRENT_TIMESTAMP qui écrit ces colonnes), et non avec
+	// elapsedSeconds, qui compare Date.now() côté Node à une date écrite en base.
 	const [candidates] = await connection.query<TicketRow[]>(
 		`SELECT * FROM matchmaking_tickets
 		 WHERE status = 'waiting' AND mode = ? AND user_id != ?
 		   AND created_at > DATE_SUB(NOW(), INTERVAL ? SECOND)
+		   AND last_seen_at > DATE_SUB(NOW(), INTERVAL ? SECOND)
 		 ORDER BY created_at ASC FOR UPDATE`,
-		[ticket.mode, ticket.user_id, TICKET_EXPIRY_SECONDS],
+		[ticket.mode, ticket.user_id, TICKET_EXPIRY_SECONDS, CANDIDATE_LIVENESS_SECONDS],
 	);
 	const myWindow = windowFor(elapsedSeconds(ticket.created_at));
 	let best: TicketRow | null = null;
@@ -168,6 +195,33 @@ const pairTickets = async (connection: PoolConnection, ticket: TicketRow, oppone
 	);
 };
 
+// Remet en file l'ADVERSAIRE d'un appariement que ce joueur est en train
+// d'abandonner implicitement (en relançant une recherche). Ne touche jamais
+// notre propre ligne : l'appelant l'écrase juste après de toute façon. Ciblé par
+// match_id, donc sans effet si l'adversaire a déjà été ré-apparié ailleurs entre
+// temps (son match_id aurait changé) — l'appel est idempotent.
+const releaseStaleMatch = async (connection: PoolConnection, userId: number): Promise<void> => {
+	const [rows] = await connection.query<TicketRow[]>(
+		"SELECT * FROM matchmaking_tickets WHERE user_id = ? FOR UPDATE",
+		[userId],
+	);
+	const previous = rows[0];
+	if (!previous || previous.status !== "matched" || !previous.match_id) return;
+	// last_seen_at n'est VOLONTAIREMENT pas rafraîchi : c'est le signe de vie du
+	// joueur, pas un champ de bookkeeping. L'adversaire ne poll plus depuis
+	// l'appariement, donc son ticket redevient 'waiting' mais reste inappariable
+	// jusqu'à ce qu'il reprenne son polling ou relance une recherche — sans quoi on
+	// le réapparierait à l'aveugle, à un moment où son client attend encore une
+	// connexion sur l'appariement précédent.
+	await connection.query(
+		`UPDATE matchmaking_tickets
+		 SET status = 'waiting', steam_lobby_id = NULL, opponent_id = NULL, role = NULL,
+		     match_id = NULL, match_session_token = NULL, created_at = CURRENT_TIMESTAMP
+		 WHERE match_id = ? AND user_id != ?`,
+		[previous.match_id, userId],
+	);
+};
+
 // Rejoint la file : un seul ticket actif par joueur tous modes confondus
 // (UNIQUE KEY user_id — un joueur ne peut de toute façon chercher qu'une
 // seule partie à la fois), un second appel remplace le précédent plutôt que
@@ -187,13 +241,26 @@ const joinQueue = async (userId: number, mode: QueueMode): Promise<string> => {
 	const connection = await db.getConnection();
 	try {
 		await connection.beginTransaction();
+		// Une recherche qui remplace un ticket DÉJÀ APPARIÉ doit libérer
+		// l'adversaire, et le serveur est le seul endroit où cette garantie tient.
+		// La table ne garde qu'une ligne par joueur (UNIQUE KEY user_id, réutilisée
+		// par le ON DUPLICATE KEY UPDATE ci-dessous) : en écrasant la nôtre, on
+		// perdait le lien vers le match et l'adversaire restait 'matched', donc
+		// non ré-appariable (findOpponent ne regarde que les 'waiting'), jusqu'à ce
+		// qu'il relance lui-même. Le client appelle bien abandonMatch avant de se
+		// remettre en file, mais les deux requêtes HTTP sont indépendantes : si le
+		// joinQueue arrive le premier, l'abandon ne trouve plus rien à abandonner
+		// (notre ticket n'est plus 'matched') et l'adversaire reste coincé. Le faire
+		// ici, dans la même transaction, rend l'ordre d'arrivée indifférent.
+		await releaseStaleMatch(connection, userId);
 		await connection.query(
 			`INSERT INTO matchmaking_tickets (ticket_id, user_id, mmr, mode, status)
 			 VALUES (?, ?, ?, ?, 'waiting')
 			 ON DUPLICATE KEY UPDATE
 			   ticket_id = VALUES(ticket_id), mmr = VALUES(mmr), mode = VALUES(mode), status = 'waiting',
 			   opponent_id = NULL, role = NULL, steam_lobby_id = NULL,
-			   match_id = NULL, match_session_token = NULL, created_at = CURRENT_TIMESTAMP`,
+			   match_id = NULL, match_session_token = NULL,
+			   created_at = CURRENT_TIMESTAMP, last_seen_at = CURRENT_TIMESTAMP`,
 			[ticketId, userId, matchmakingMmr, mode],
 		);
 		const [rows] = await connection.query<TicketRow[]>(
@@ -213,12 +280,17 @@ const joinQueue = async (userId: number, mode: QueueMode): Promise<string> => {
 	}
 };
 
-const toStatusResult = (ticket: TicketRow): QueueStatusResult => {
+// opponentSteamId est lu à part (jointure sur linked_accounts, voir
+// fetchSteamId) plutôt que stocké sur le ticket : il ne change jamais pour un
+// compte donné, le dupliquer dans la table n'apporterait qu'un risque de
+// désynchronisation.
+const toStatusResult = (ticket: TicketRow, opponentSteamId?: string): QueueStatusResult => {
 	if (ticket.status === "matched") {
 		return {
 			status: "matched",
 			role: ticket.role as "host" | "guest",
 			opponent_id: ticket.opponent_id as number,
+			opponent_steam_id: opponentSteamId,
 			steam_lobby_id: toExactLobbyId(ticket.steam_lobby_id),
 			match_id: ticket.match_id as string,
 			match_session_token: ticket.match_session_token as string,
@@ -228,6 +300,21 @@ const toStatusResult = (ticket: TicketRow): QueueStatusResult => {
 	if (ticket.status === "expired") return { status: "expired" };
 	const elapsed = elapsedSeconds(ticket.created_at);
 	return { status: "waiting", mmr: ticket.mmr, window: windowFor(elapsed), elapsed_seconds: Math.floor(elapsed) };
+};
+
+// SteamID64 d'un joueur (VARCHAR en base, donc jamais arrondi contrairement à
+// un BIGINT lu en nombre — voir helper/steamLobbyId.ts pour l'historique).
+// undefined si le compte n'a pas de SteamID lié : c'est possible pour un compte
+// créé côté site, et le client doit pouvoir le distinguer d'un id valide plutôt
+// que de tenter une connexion P2P vers 0.
+const fetchSteamId = async (connection: PoolConnection, userId: number | null): Promise<string | undefined> => {
+	if (!userId) return undefined;
+	const [rows] = await connection.query<RowDataPacket[]>(
+		"SELECT external_id FROM linked_accounts WHERE user_id = ? AND provider = 'steam' LIMIT 1",
+		[userId],
+	);
+	const externalId = rows[0]?.external_id;
+	return typeof externalId === "string" && externalId !== "" ? externalId : undefined;
 };
 
 // Interroge l'état d'un ticket (poll client toutes les 2s). Retente un
@@ -256,6 +343,12 @@ const getQueueStatus = async (userId: number, ticketId: string): Promise<QueueSt
 			return { status: "expired" };
 		}
 
+		// Ce poll EST le signe de vie du joueur : sans lui, findOpponent ne saurait
+		// pas distinguer un joueur qui attend d'un joueur qui a fermé le jeu (voir
+		// CANDIDATE_LIVENESS_SECONDS). Écrit avec l'heure du serveur MySQL, comme
+		// la colonne est lue.
+		await connection.query("UPDATE matchmaking_tickets SET last_seen_at = NOW() WHERE id = ?", [ticket.id]);
+
 		if (ticket.status === "waiting") {
 			const opponent = await findOpponent(connection, ticket);
 			if (opponent) {
@@ -264,15 +357,17 @@ const getQueueStatus = async (userId: number, ticketId: string): Promise<QueueSt
 					"SELECT * FROM matchmaking_tickets WHERE id = ?",
 					[ticket.id],
 				);
+				const steamId = await fetchSteamId(connection, opponent.user_id);
 				await connection.commit();
-				return toStatusResult(refreshed[0]);
+				return toStatusResult(refreshed[0], steamId);
 			}
 			await connection.commit();
 			return toStatusResult(ticket);
 		}
 
+		const opponentSteamId = await fetchSteamId(connection, ticket.opponent_id);
 		await connection.commit();
-		return toStatusResult(ticket);
+		return toStatusResult(ticket, opponentSteamId);
 	} catch (error) {
 		await connection.rollback();
 		throw error;
@@ -366,6 +461,9 @@ const abandonMatch = async (userId: number, ticketId: string): Promise<boolean> 
 			 WHERE match_id = ?`,
 			[ticket.match_id],
 		);
+		// Seul l'appelant est encore là, manifestement : lui seul est réputé vivant
+		// (voir releaseStaleMatch pour le détail de ce choix).
+		await connection.query("UPDATE matchmaking_tickets SET last_seen_at = NOW() WHERE id = ?", [ticket.id]);
 		await connection.commit();
 		return true;
 	} catch (error) {

@@ -178,6 +178,12 @@ const MATCHMAKING_TICKETS_COLUMNS_TO_ENSURE: { name: string; ddl: string }[] = [
 	// pour que les tickets déjà en base (toujours du classé jusqu'ici) restent
 	// cohérents sans backfill.
 	{ name: "mode", ddl: "mode VARCHAR(10) NOT NULL DEFAULT 'ranked'" },
+	// Dernier poll du propriétaire du ticket (voir matchmakingModel.findOpponent) :
+	// un ticket n'est appariable que si son joueur donne encore signe de vie, sinon
+	// on apparie un fantôme (jeu fermé, réseau coupé) et l'autre attend dans le
+	// vide. DEFAULT CURRENT_TIMESTAMP : les tickets déjà en base passent pour
+	// vivants une fois, et le premier poll les remet dans le rang.
+	{ name: "last_seen_at", ddl: "last_seen_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP" },
 ];
 
 const ensureMatchmakingTicketsColumns = async (connection: mysql.Connection): Promise<void> => {
