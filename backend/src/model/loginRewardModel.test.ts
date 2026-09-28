@@ -42,8 +42,9 @@ describe("rewardForDay", () => {
 		});
 	});
 
-	it("cycles back to day 1's reward on day 8", () => {
-		expect(rewardForDay(8)).toBe(REWARD_BY_DAY[0]);
+	it("plateaus on the highest reward past day 7", () => {
+		expect(rewardForDay(8)).toBe(REWARD_BY_DAY[6]);
+		expect(rewardForDay(365)).toBe(REWARD_BY_DAY[6]);
 	});
 });
 
@@ -58,13 +59,13 @@ describe("getUpcomingRewards", () => {
 		]);
 	});
 
-	it("cycles the reward through the 7-day table across the wrap", () => {
+	it("keeps the highest reward once past the 7-day ramp", () => {
 		expect(getUpcomingRewards(6)).toEqual([
 			{ day: 6, reward: REWARD_BY_DAY[5] },
 			{ day: 7, reward: REWARD_BY_DAY[6] },
-			{ day: 8, reward: REWARD_BY_DAY[0] },
-			{ day: 9, reward: REWARD_BY_DAY[1] },
-			{ day: 10, reward: REWARD_BY_DAY[2] },
+			{ day: 8, reward: REWARD_BY_DAY[6] },
+			{ day: 9, reward: REWARD_BY_DAY[6] },
+			{ day: 10, reward: REWARD_BY_DAY[6] },
 		]);
 	});
 });

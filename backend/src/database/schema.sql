@@ -37,14 +37,20 @@ CREATE TABLE users (
   username VARCHAR(50) NOT NULL,
   soft_currency INT NOT NULL DEFAULT 0,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  -- Rempli par POST /api/collection/claim-starter (fin de tutoriel) : évite de
-  -- regrant/recréer les decks de départ si le joueur relance la réclamation.
+  -- Rempli par POST /api/collection/claim-starter (première connexion, voir
+  -- LoadingScreen côté client) : évite de regrant/recréer les decks de départ
+  -- si le joueur relance la réclamation.
   starter_claimed_at TIMESTAMP NULL DEFAULT NULL,
   -- Rempli par POST /api/currency/claim-starter-bonus : bonus de départ
   -- (250, voir currencyModel.claimStarterBonus) distinct de starter_claimed_at
   -- (cartes/decks) pour les comptes créés avant l'ajout de ce bonus, qui
   -- reçoivent désormais 250 dès la création (voir userModel.createWithSteamAccount).
   starter_currency_claimed_at TIMESTAMP NULL DEFAULT NULL,
+  -- Rempli par POST /api/collection/claim-tutorial-reward : lot unique de 25
+  -- cartes aléatoires octroyé à la fin du tutoriel (voir
+  -- model/tutorialRewardModel). Distinct de starter_claimed_at, qui est
+  -- désormais réclamé dès la première connexion et non en fin de tutoriel.
+  tutorial_reward_claimed_at TIMESTAMP NULL DEFAULT NULL,
   -- Rempli par POST /api/currency/claim-first-login-bonus : quête cachée de
   -- première connexion Steam (500, voir currencyModel.claimFirstLoginReward).
   -- Appelée aussi bien depuis le site (après le callback OpenID) que depuis
