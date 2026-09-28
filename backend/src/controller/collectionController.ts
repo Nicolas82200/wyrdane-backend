@@ -101,7 +101,7 @@ const claimStarter = async (req: Request, res: Response): Promise<void> => {
 };
 
 // Appelée par le client (TutorialManager.notify_victory) à la toute fin du
-// tutoriel : octroie un lot unique de 25 cartes aléatoires (voir
+// tutoriel : octroie un lot unique de 20 cartes aléatoires (voir
 // model/tutorialRewardModel). Distincte de claim-starter, qui est désormais
 // réclamée dès la première connexion (LoadingScreen) et pas à la fin du
 // tutoriel. Idempotente : un second appel renvoie claimed:false.

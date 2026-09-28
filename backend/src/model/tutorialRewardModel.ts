@@ -9,10 +9,10 @@ import type { Cards } from "../types";
 // Récompense de fin de tutoriel : les 4 decks de départ (voir
 // data/starterDecks.ts) ne contiennent que des serviteurs et quelques
 // éphémères — un nouveau joueur n'avait donc jamais vu un Rituel ni un
-// Enchantement avant d'en ouvrir des packs. Ce lot de 25 cartes tirées dans
+// Enchantement avant d'en ouvrir des packs. Ce lot de 20 cartes tirées dans
 // TOUT le catalogue (hors ressources) comble ce trou dès la sortie du
 // tutoriel.
-const TUTORIAL_REWARD_CARDS = 25;
+const TUTORIAL_REWARD_CARDS = 20;
 
 // Pondération volontairement bien plus généreuse que celle des packs
 // (packModel.RARITY_WEIGHTS, 58/25/12/5) : c'est une récompense unique, pas
