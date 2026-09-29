@@ -55,6 +55,19 @@ const findByUserId = async (userId: number): Promise<UserCardRow[]> => {
 	return rows;
 };
 
+// Ids des cartes dont le joueur possède au moins un exemplaire. Volontairement
+// plus léger que findByUserId (qui joint toute la table cards) : appelé à
+// chaque ouverture de pack pour pondérer le tirage (voir
+// packModel.duplicateWeightFactor), seul l'id compte.
+const findOwnedCardIds = async (userId: number, connection?: PoolConnection): Promise<Set<number>> => {
+	const runner = connection ?? db;
+	const [rows] = await runner.query<(RowDataPacket & { card_id: number })[]>(
+		"SELECT card_id FROM user_cards WHERE user_id = ? AND quantity > 0",
+		[userId],
+	);
+	return new Set(rows.map((row) => row.card_id));
+};
+
 // Accorde (ou complète) la possession d'une carte pour un joueur. Utilisée en
 // interne (fin de partie, boutique, seed dev) : pas de route HTTP publique.
 const grantCard = async (
@@ -193,6 +206,7 @@ const buyCard = async (userId: number, cardId: number): Promise<{ balance: numbe
 
 export {
 	findByUserId,
+	findOwnedCardIds,
 	grantCard,
 	grantAllCards,
 	findIdsByName,

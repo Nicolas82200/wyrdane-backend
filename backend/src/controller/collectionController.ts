@@ -6,6 +6,7 @@ import { InsufficientFundsError } from "../model/currencyModel";
 import { create as createDeck, replaceCards } from "../model/decksModel";
 import { hasClaimedStarter, markStarterClaimed } from "../model/userModel";
 import { completeReferralIfPending } from "../model/referralModel";
+import { claimTutorialReward as claimTutorialRewardModel } from "../model/tutorialRewardModel";
 import { STARTER_DECKS } from "../data/starterDecks";
 import { getUserId } from "../helper/requestUser";
 
@@ -99,6 +100,27 @@ const claimStarter = async (req: Request, res: Response): Promise<void> => {
 	}
 };
 
+// Appelée par le client (TutorialManager.notify_victory) à la toute fin du
+// tutoriel : octroie un lot unique de 20 cartes aléatoires (voir
+// model/tutorialRewardModel). Distincte de claim-starter, qui est désormais
+// réclamée dès la première connexion (LoadingScreen) et pas à la fin du
+// tutoriel. Idempotente : un second appel renvoie claimed:false.
+const claimTutorialReward = async (req: Request, res: Response): Promise<void> => {
+	try {
+		const userId = getUserId(req);
+		if (!userId) {
+			res.status(401).json({ message: "Non authentifié" });
+			return;
+		}
+
+		const result = await claimTutorialRewardModel(userId);
+		res.status(200).json(result);
+	} catch (error) {
+		console.error(error);
+		res.status(500).json({ message: "Server error" });
+	}
+};
+
 const buyCard = async (req: Request, res: Response): Promise<void> => {
 	try {
 		const userId = getUserId(req);
@@ -129,4 +151,4 @@ const buyCard = async (req: Request, res: Response): Promise<void> => {
 	}
 };
 
-export { getCollection, claimStarter, buyCard };
+export { getCollection, claimStarter, claimTutorialReward, buyCard };

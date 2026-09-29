@@ -7,8 +7,8 @@ import { credit, creditFreePacks } from "./currencyModel";
 // (referrer_id UNIQUE en base, voir schema.sql) — contrainte anti-abus posée
 // au niveau du schéma plutôt qu'en logique applicative pour ne jamais pouvoir
 // être contournée par une course entre deux requêtes concurrentes.
-const REFERRAL_REWARD_GOLD = 500;
-const REFERRAL_REWARD_PACKS = 3;
+const REFERRAL_REWARD_GOLD = 0;
+const REFERRAL_REWARD_PACKS = 4;
 
 // Alphabet sans caractères ambigus à l'oeil (0/O, 1/I) — code affiché/tapé
 // manuellement par le joueur.

@@ -10,14 +10,16 @@ class AlreadyClaimedTodayError extends Error {
 	}
 }
 
-// Récompense croissante sur 7 jours de connexion consécutifs, puis la série
-// reboucle (jour 8 = jour 1) — voir rewardForDay. Un jour manqué reset le
-// PALIER de récompense à 1, mais streak_day en base continue de compter le
-// nombre total de jours consécutifs (pas plafonné à 7) : simple compteur de
-// série affiché tel quel, la récompense elle-même est dérivée modulo 7.
-const REWARD_BY_DAY = [10, 15, 20, 25, 30, 40, 60];
+// Récompense croissante sur 5 jours de connexion consécutifs, puis PLATEAU :
+// au-delà du 5e jour la série ne reboucle plus (elle rebouclait sur 7 jours
+// jusqu'au 2026-09-28, un joueur fidèle retombait donc à la plus petite
+// récompense au jour 8), chaque jour consécutif supplémentaire verse le palier
+// maximal. Un jour manqué remet le palier à 1. streak_day en base continue de
+// compter le nombre total de jours consécutifs, sans plafond.
+const REWARD_BY_DAY = [20, 40, 60, 80, 100];
 
-const rewardForDay = (day: number): number => REWARD_BY_DAY[(day - 1) % REWARD_BY_DAY.length];
+const rewardForDay = (day: number): number =>
+	REWARD_BY_DAY[Math.min(Math.max(day, 1), REWARD_BY_DAY.length) - 1];
 
 interface LoginRewardRow extends RowDataPacket {
 	user_id: number;

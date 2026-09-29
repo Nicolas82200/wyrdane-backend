@@ -29,18 +29,72 @@ interface UniqueQuestTemplate {
 	// Uniquement pour reach_tier : seuil de MMR requis, dupliqué depuis
 	// RankTier.THRESHOLDS côté client (voir RANK_TIER_MMR_THRESHOLDS
 	// ci-dessous) — le backend n'a autrement aucune notion de palier.
-	tier?: "gold" | "legend";
+	tier?: RankTierName;
 }
 
 const IMPLEMENTED_RACES = ["Human", "Undead", "Demon", "Abomination"] as const;
 
+type RankTierName = "silver" | "gold" | "platinum" | "diamond" | "master" | "legend";
+
 // Copie de RankTier.THRESHOLDS (scripts/data/RankTier.gd côté client) : à
-// tenir synchronisé si les seuils changent là-bas. Uniquement les deux
-// paliers concernés par une quête unique.
-const RANK_TIER_MMR_THRESHOLDS: Record<"gold" | "legend", number> = {
-	gold: 1300,
-	legend: 1600,
+// tenir synchronisé si les seuils changent là-bas. Bronze n'y figure pas —
+// c'est le palier de départ de tout le monde, il ne se "gagne" pas.
+// Ces valeurs avaient silencieusement divergé du client (gold: 1300 /
+// legend: 1600 ici contre 400 / 1200 côté RankTier.gd) : la quête Or ne se
+// validait donc qu'à un MMR trois fois supérieur à celui qui affichait déjà
+// le badge Or au joueur. Resynchronisé le 2026-09-28.
+const RANK_TIER_MMR_THRESHOLDS: Record<RankTierName, number> = {
+	silver: 200,
+	gold: 400,
+	platinum: 600,
+	diamond: 800,
+	master: 1000,
+	legend: 1200,
 };
+
+// Récompense par palier de rang : progression régulière jusqu'à Légende
+// (1000 or + 5 packs), le plus haut palier atteignable en classé.
+const RANK_TIER_REWARDS: Record<RankTierName, { currency: number; pack: number }> = {
+	silver: { currency: 100, pack: 0 },
+	gold: { currency: 200, pack: 1 },
+	platinum: { currency: 350, pack: 1 },
+	diamond: { currency: 500, pack: 1 },
+	master: { currency: 700, pack: 2 },
+	legend: { currency: 900, pack: 5 },
+};
+
+const rankTierQuestTemplates = (): UniqueQuestTemplate[] =>
+	(Object.keys(RANK_TIER_MMR_THRESHOLDS) as RankTierName[]).map((tier) => ({
+		code: `reach_${tier}`,
+		objective: "reach_tier" as const,
+		tier,
+		target: 1,
+		rewardCurrency: RANK_TIER_REWARDS[tier].currency,
+		rewardPack: RANK_TIER_REWARDS[tier].pack,
+		descriptionKey: `QUEST_UNIQUE_REACH_${tier.toUpperCase()}`,
+	}));
+
+// Paliers "jouez X parties" : un tous les 50 jusqu'à 250. Les paliers sont
+// indépendants (une ligne chacun), mais partagent le même compteur logique —
+// voir syncNewRowsProgress, qui reporte la progression déjà acquise sur un
+// palier fraîchement ajouté au catalogue.
+const PLAY_MILESTONES: { target: number; currency: number; pack: number }[] = [
+	{ target: 50, currency: 400, pack: 0 },
+	{ target: 100, currency: 600, pack: 0 },
+	{ target: 150, currency: 700, pack: 0 },
+	{ target: 200, currency: 850, pack: 1 },
+	{ target: 250, currency: 1000, pack: 1 },
+];
+
+const playQuestTemplates = (): UniqueQuestTemplate[] =>
+	PLAY_MILESTONES.map(({ target, currency, pack }) => ({
+		code: `play_${target}`,
+		objective: "play" as const,
+		target,
+		rewardCurrency: currency,
+		rewardPack: pack,
+		descriptionKey: `QUEST_UNIQUE_PLAY_${target}`,
+	}));
 
 const raceFirstQuestTemplates = (): UniqueQuestTemplate[] =>
 	IMPLEMENTED_RACES.map((race) => ({
@@ -59,7 +113,7 @@ const UNIQUE_QUEST_TEMPLATES: UniqueQuestTemplate[] = [
 		code: "first_multirace_win",
 		objective: "win_multirace_first",
 		target: 1,
-		rewardCurrency: 250,
+		rewardCurrency: 200,
 		rewardPack: 0,
 		descriptionKey: "QUEST_UNIQUE_FIRST_MULTIRACE",
 	},
@@ -67,19 +121,20 @@ const UNIQUE_QUEST_TEMPLATES: UniqueQuestTemplate[] = [
 		code: "win_all_races",
 		objective: "win_all_races",
 		target: IMPLEMENTED_RACES.length,
-		rewardCurrency: 500,
+		rewardCurrency: 400,
 		rewardPack: 1,
 		descriptionKey: "QUEST_UNIQUE_WIN_ALL_RACES",
 	},
-	{ code: "play_50", objective: "play", target: 50, rewardCurrency: 300, rewardPack: 0, descriptionKey: "QUEST_UNIQUE_PLAY_50" },
-	{ code: "play_200", objective: "play", target: 200, rewardCurrency: 800, rewardPack: 1, descriptionKey: "QUEST_UNIQUE_PLAY_200" },
-	{ code: "win_25", objective: "win", target: 25, rewardCurrency: 400, rewardPack: 0, descriptionKey: "QUEST_UNIQUE_WIN_25" },
-	{ code: "win_100", objective: "win", target: 100, rewardCurrency: 1000, rewardPack: 2, descriptionKey: "QUEST_UNIQUE_WIN_100" },
+	...playQuestTemplates(),
+	...rankTierQuestTemplates(),
+	{ code: "win_10", objective: "win", target: 10, rewardCurrency: 100, rewardPack: 1, descriptionKey: "QUEST_UNIQUE_WIN_10" },
+	{ code: "win_25", objective: "win", target: 25, rewardCurrency: 200, rewardPack: 2, descriptionKey: "QUEST_UNIQUE_WIN_25" },
+	{ code: "win_100", objective: "win", target: 100, rewardCurrency: 900, rewardPack: 1, descriptionKey: "QUEST_UNIQUE_WIN_100" },
 	{
 		code: "win_ranked_10",
 		objective: "win_ranked",
 		target: 10,
-		rewardCurrency: 500,
+		rewardCurrency: 400,
 		rewardPack: 0,
 		descriptionKey: "QUEST_UNIQUE_WIN_RANKED_10",
 	},
@@ -87,34 +142,16 @@ const UNIQUE_QUEST_TEMPLATES: UniqueQuestTemplate[] = [
 		code: "win_ranked_50",
 		objective: "win_ranked",
 		target: 50,
-		rewardCurrency: 1200,
-		rewardPack: 2,
-		descriptionKey: "QUEST_UNIQUE_WIN_RANKED_50",
-	},
-	{
-		code: "reach_gold",
-		objective: "reach_tier",
-		tier: "gold",
-		target: 1,
-		rewardCurrency: 0,
-		rewardPack: 1,
-		descriptionKey: "QUEST_UNIQUE_REACH_GOLD",
-	},
-	{
-		code: "reach_legend",
-		objective: "reach_tier",
-		tier: "legend",
-		target: 1,
-		rewardCurrency: 0,
+		rewardCurrency: 900,
 		rewardPack: 3,
-		descriptionKey: "QUEST_UNIQUE_REACH_LEGEND",
+		descriptionKey: "QUEST_UNIQUE_WIN_RANKED_50",
 	},
 	{
 		code: "open_packs_20",
 		objective: "open_packs",
 		target: 20,
-		rewardCurrency: 400,
-		rewardPack: 0,
+		rewardCurrency: 0,
+		rewardPack: 5,
 		descriptionKey: "QUEST_UNIQUE_OPEN_PACKS_20",
 	},
 ];
@@ -193,7 +230,69 @@ const ensureUniqueQuests = async (userId: number): Promise<UniqueQuestRow[]> => 
 		"SELECT * FROM unique_quests WHERE user_id = ? ORDER BY id",
 		[userId],
 	);
+	await reconcileWithTemplates(rows);
 	return rows;
+};
+
+// Objectifs dont tous les paliers comptent exactement la même chose : leur
+// progression est interchangeable d'un palier à l'autre (voir plus bas).
+const CUMULATIVE_OBJECTIVES = new Set(["play", "win", "win_ranked", "open_packs"]);
+
+// Recale les lignes déjà assignées sur le catalogue courant, en place (les
+// lignes passées en argument sont mises à jour aussi, elles sont renvoyées à
+// l'appelant). Deux corrections, toutes deux réservées aux quêtes NON
+// réclamées (une récompense déjà versée ne se réécrit jamais a posteriori) :
+//
+//  1. Cible/récompenses : elles sont figées dans la ligne à l'assignation
+//     (l'INSERT ci-dessus n'écrase rien sur doublon), donc sans ce recalage un
+//     rééquilibrage du catalogue ne toucherait que les nouveaux comptes.
+//  2. Progression d'un palier ajouté après coup (ex. "jouez 250 parties",
+//     ouvert le 2026-09-28) : il hérite de la progression déjà acquise sur les
+//     paliers voisins du même objectif, sinon un joueur à 300 parties
+//     repartirait de zéro dessus.
+//
+// Aucune requête n'est émise quand tout est déjà conforme (cas courant) : la
+// fonction est appelée à chaque getUniqueQuests et à chaque fin de match.
+const reconcileWithTemplates = async (rows: UniqueQuestRow[]): Promise<void> => {
+	const byCode = new Map(rows.map((row) => [row.quest_code, row]));
+
+	// Meilleure progression connue par objectif cumulatif — une quête réclamée
+	// prouve que sa cible a été atteinte, elle compte donc pour sa target.
+	const reachedByObjective = new Map<string, number>();
+	for (const template of UNIQUE_QUEST_TEMPLATES) {
+		if (!CUMULATIVE_OBJECTIVES.has(template.objective)) continue;
+		const row = byCode.get(template.code);
+		if (!row) continue;
+		const reached = row.claimed_at !== null ? row.target : row.progress;
+		reachedByObjective.set(template.objective, Math.max(reachedByObjective.get(template.objective) ?? 0, reached));
+	}
+
+	for (const template of UNIQUE_QUEST_TEMPLATES) {
+		const row = byCode.get(template.code);
+		if (!row || row.claimed_at !== null) continue;
+
+		const progress = Math.min(
+			Math.max(row.progress, CUMULATIVE_OBJECTIVES.has(template.objective) ? (reachedByObjective.get(template.objective) ?? 0) : 0),
+			template.target,
+		);
+		if (
+			row.target === template.target &&
+			row.reward_currency === template.rewardCurrency &&
+			row.reward_pack === template.rewardPack &&
+			row.progress === progress
+		) {
+			continue;
+		}
+
+		await db.query(
+			"UPDATE unique_quests SET target = ?, reward_currency = ?, reward_pack = ?, progress = ? WHERE id = ?",
+			[template.target, template.rewardCurrency, template.rewardPack, progress, row.id],
+		);
+		row.target = template.target;
+		row.reward_currency = template.rewardCurrency;
+		row.reward_pack = template.rewardPack;
+		row.progress = progress;
+	}
 };
 
 const getUniqueQuests = async (userId: number): Promise<UniqueQuestsResponse> => {
@@ -330,6 +429,7 @@ const claimUniqueQuest = async (
 
 export {
 	UNIQUE_QUEST_TEMPLATES,
+	RANK_TIER_MMR_THRESHOLDS,
 	UniqueQuestNotFoundError,
 	UniqueQuestNotCompletedError,
 	UniqueQuestAlreadyClaimedError,

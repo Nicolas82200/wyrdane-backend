@@ -22,10 +22,10 @@ interface OnboardingQuestTemplate {
 
 const ONBOARDING_QUEST_TEMPLATES: OnboardingQuestTemplate[] = [
 	{ code: "reach_level_5", objective: "reach_level", level: 5, target: 1, rewardCurrency: 100, rewardPack: 0, descriptionKey: "QUEST_ONBOARDING_REACH_LEVEL_5" },
-	{ code: "reach_level_10", objective: "reach_level", level: 10, target: 1, rewardCurrency: 150, rewardPack: 1, descriptionKey: "QUEST_ONBOARDING_REACH_LEVEL_10" },
-	{ code: "reach_level_15", objective: "reach_level", level: 15, target: 1, rewardCurrency: 200, rewardPack: 0, descriptionKey: "QUEST_ONBOARDING_REACH_LEVEL_15" },
+	{ code: "reach_level_10", objective: "reach_level", level: 10, target: 1, rewardCurrency: 150, rewardPack: 0, descriptionKey: "QUEST_ONBOARDING_REACH_LEVEL_10" },
+	{ code: "reach_level_15", objective: "reach_level", level: 15, target: 1, rewardCurrency: 200, rewardPack: 1, descriptionKey: "QUEST_ONBOARDING_REACH_LEVEL_15" },
 	{ code: "reach_level_20", objective: "reach_level", level: 20, target: 1, rewardCurrency: 250, rewardPack: 1, descriptionKey: "QUEST_ONBOARDING_REACH_LEVEL_20" },
-	{ code: "reach_level_25", objective: "reach_level", level: 25, target: 1, rewardCurrency: 400, rewardPack: 2, descriptionKey: "QUEST_ONBOARDING_REACH_LEVEL_25" },
+	{ code: "reach_level_25", objective: "reach_level", level: 25, target: 1, rewardCurrency: 300, rewardPack: 2, descriptionKey: "QUEST_ONBOARDING_REACH_LEVEL_25" },
 	{ code: "buy_packs_1", objective: "buy_packs", target: 1, rewardCurrency: 50, rewardPack: 0, descriptionKey: "QUEST_ONBOARDING_BUY_PACKS_1" },
 	{ code: "buy_packs_5", objective: "buy_packs", target: 5, rewardCurrency: 200, rewardPack: 0, descriptionKey: "QUEST_ONBOARDING_BUY_PACKS_5" },
 	{ code: "buy_packs_10", objective: "buy_packs", target: 10, rewardCurrency: 400, rewardPack: 0, descriptionKey: "QUEST_ONBOARDING_BUY_PACKS_10" },
@@ -106,7 +106,39 @@ const ensureOnboardingQuests = async (userId: number, currentLevel: number): Pro
 		"SELECT * FROM onboarding_quests WHERE user_id = ? ORDER BY id",
 		[userId],
 	);
+	await reconcileWithTemplates(rows);
 	return rows;
+};
+
+// Meme correctif que uniqueQuestModel.reconcileWithTemplates, et pour la meme
+// raison : cible et recompenses sont figees dans la ligne a l'assignation
+// (l'INSERT ci-dessus n'ecrase rien sur doublon) et cette piste n'est JAMAIS
+// reset, contrairement aux quotidiennes/hebdo/mensuelles qui reprennent une
+// ligne neuve a chaque periode. Sans ce recalage, un reequilibrage du
+// catalogue ne toucherait que les comptes crees apres. Reserve aux quetes non
+// reclamees : une recompense deja versee ne se reecrit jamais a posteriori.
+// Aucune requete emise quand tout est deja conforme (cas courant).
+const reconcileWithTemplates = async (rows: OnboardingQuestRow[]): Promise<void> => {
+	const byCode = new Map(rows.map((row) => [row.quest_code, row]));
+	for (const template of ONBOARDING_QUEST_TEMPLATES) {
+		const row = byCode.get(template.code);
+		if (!row || row.claimed_at !== null) continue;
+		if (
+			row.target === template.target &&
+			row.reward_currency === template.rewardCurrency &&
+			row.reward_pack === template.rewardPack
+		) {
+			continue;
+		}
+		await db.query(
+			"UPDATE onboarding_quests SET target = ?, reward_currency = ?, reward_pack = ?, progress = LEAST(progress, ?) WHERE id = ?",
+			[template.target, template.rewardCurrency, template.rewardPack, template.target, row.id],
+		);
+		row.target = template.target;
+		row.reward_currency = template.rewardCurrency;
+		row.reward_pack = template.rewardPack;
+		row.progress = Math.min(row.progress, template.target);
+	}
 };
 
 // GET : sous le niveau 25, tout le catalogue (complété ou pas) ; au-delà,

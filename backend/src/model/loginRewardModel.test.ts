@@ -36,14 +36,18 @@ const row = (overrides: Partial<Record<string, unknown>> = {}) => ({
 });
 
 describe("rewardForDay", () => {
-	it("returns the matching reward for days 1-7", () => {
+	it("returns the matching reward for every day of the ramp", () => {
 		REWARD_BY_DAY.forEach((reward, index) => {
 			expect(rewardForDay(index + 1)).toBe(reward);
 		});
 	});
 
-	it("cycles back to day 1's reward on day 8", () => {
-		expect(rewardForDay(8)).toBe(REWARD_BY_DAY[0]);
+	// Longueur de la rampe jamais ecrite en dur : elle a deja change deux fois
+	// (7 jours, puis 5 le 2026-09-28) et ces tests doivent survivre a la suivante.
+	it("plateaus on the highest reward past the end of the ramp", () => {
+		const last = REWARD_BY_DAY[REWARD_BY_DAY.length - 1];
+		expect(rewardForDay(REWARD_BY_DAY.length + 1)).toBe(last);
+		expect(rewardForDay(365)).toBe(last);
 	});
 });
 
@@ -58,13 +62,13 @@ describe("getUpcomingRewards", () => {
 		]);
 	});
 
-	it("cycles the reward through the 7-day table across the wrap", () => {
-		expect(getUpcomingRewards(6)).toEqual([
-			{ day: 6, reward: REWARD_BY_DAY[5] },
-			{ day: 7, reward: REWARD_BY_DAY[6] },
-			{ day: 8, reward: REWARD_BY_DAY[0] },
-			{ day: 9, reward: REWARD_BY_DAY[1] },
-			{ day: 10, reward: REWARD_BY_DAY[2] },
+	it("keeps the highest reward once past the end of the ramp", () => {
+		const len = REWARD_BY_DAY.length;
+		const last = REWARD_BY_DAY[len - 1];
+		expect(getUpcomingRewards(len, 3)).toEqual([
+			{ day: len, reward: last },
+			{ day: len + 1, reward: last },
+			{ day: len + 2, reward: last },
 		]);
 	});
 });
