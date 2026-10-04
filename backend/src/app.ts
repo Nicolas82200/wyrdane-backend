@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import express, { Request, Response } from "express";
+import express, { Request, Response, NextFunction } from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
 
@@ -18,6 +18,17 @@ const app = express();
 // valeur de `X-Forwarded-For` ne soit pas usurpable par un client qui
 // enverrait sa propre chaîne d'en-têtes.
 app.set("trust proxy", 1);
+
+// En-têtes de sécurité HTTP minimaux (pas de dépendance `helmet` pour si peu) :
+// Nginx est en frontal sur le VPS mais ne les pose pas lui-même (vérifié dans
+// sa config) — sans ça, aucun en-tête de durcissement n'était envoyé du tout.
+app.use((req: Request, res: Response, next: NextFunction) => {
+	res.setHeader("X-Content-Type-Options", "nosniff");
+	res.setHeader("X-Frame-Options", "DENY");
+	res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+	res.setHeader("Strict-Transport-Security", "max-age=15552000; includeSubDomains");
+	next();
+});
 
 app.use(
 	cors({

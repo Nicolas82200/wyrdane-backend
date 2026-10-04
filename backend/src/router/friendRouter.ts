@@ -7,7 +7,11 @@ const router = Router();
 
 // Ordre important : routes littérales avant "/:id" pour ne jamais être
 // capturées par le paramètre dynamique (même habitude que rankedRouter).
-router.get("/search", search);
+router.get(
+	"/search",
+	rateLimit({ windowMs: 10 * 60 * 1000, max: 30, name: "friends:search" }),
+	search,
+);
 router.post("/resolve-steam-ids", resolveSteamFriends);
 router.get("/requests", listIncomingRequests);
 router.post(
