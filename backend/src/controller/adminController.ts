@@ -1,7 +1,9 @@
 import { Request, Response } from "express";
+import { join } from "path";
 
 import { getStats, setWishlistCount } from "../model/analyticsModel";
 import { getCardStats } from "../model/rankedModel";
+import { syncCardsFromFile } from "../model/cardSyncModel";
 
 // Ping simple pour que le site sache s'il doit afficher le lien vers le
 // dashboard : n'est atteignable qu'après authorization + requireAdmin, donc
@@ -60,4 +62,23 @@ const getAdminCardStats = async (req: Request, res: Response): Promise<void> => 
 	}
 };
 
-export { me, getAdminStats, updateWishlistCount, getAdminCardStats };
+// Applique database/cards_data.sql (régénéré depuis card-game par
+// scripts/generate-cards-data.mjs, commité à chaque resync) à la base en
+// place — UPDATE par nom pour les cartes existantes, INSERT pour les
+// nouvelles, ne supprime jamais de ligne (voir l'en-tête de
+// cardSyncModel.ts). Équivalent HTTP de `npm run db:sync-cards`, pour les
+// environnements où lancer ce script nécessiterait un accès SSH manuel au
+// serveur (prod) — réservé aux admins (requireAdmin), même protection que
+// le reste de ce routeur.
+const syncCards = async (req: Request, res: Response): Promise<void> => {
+	try {
+		const cardsDataPath = join(__dirname, "..", "database", "cards_data.sql");
+		const result = await syncCardsFromFile(cardsDataPath);
+		res.status(200).json(result);
+	} catch (error) {
+		console.error(error);
+		res.status(500).json({ message: "Server error" });
+	}
+};
+
+export { me, getAdminStats, updateWishlistCount, getAdminCardStats, syncCards };
