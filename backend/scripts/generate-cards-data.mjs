@@ -95,6 +95,18 @@ const RARITY_MAP = {
 };
 const LANE_MAP = { Front: "Avant", Back: "Arrière", Hybrid: "Hybride" };
 
+// Certains .tres (notamment la passe de renommage Humain) contiennent un
+// vrai \r\n dans la valeur d'un champ texte multi-lignes plutôt qu'un \n
+// seul — selon l'éditeur/l'OS avec lequel la carte a été modifiée en
+// dernier. cards_data.sql doit rester cohérent en LF uniquement : le reste
+// de la chaîne (wyrdane-website cardTranslations.json, qui sert de clé de
+// traduction) est lui-même normalisé en LF, donc le moindre \r résiduel ici
+// fait échouer la recherche de traduction et la carte retombe en français
+// même en mode anglais.
+function normalizeNewlines(v) {
+  return typeof v === "string" ? v.replace(/\r\n/g, "\n") : v;
+}
+
 function sqlStr(v) {
   if (v === null || v === undefined) return "NULL";
   return "'" + String(v).replace(/'/g, "''") + "'";
@@ -133,9 +145,9 @@ for (const file of files) {
   }
   const resourceBlock = text.slice(resIdx);
 
-  const name = extractField(resourceBlock, "card_name");
-  const description = extractField(resourceBlock, "description") ?? "";
-  const flavor = extractField(resourceBlock, "flavour_text") ?? "";
+  const name = normalizeNewlines(extractField(resourceBlock, "card_name"));
+  const description = normalizeNewlines(extractField(resourceBlock, "description") ?? "");
+  const flavor = normalizeNewlines(extractField(resourceBlock, "flavour_text") ?? "");
   const cost = extractField(resourceBlock, "cost") ?? 1;
   const raceInt = extractField(resourceBlock, "race") ?? 4;
   const cardType = extractField(resourceBlock, "card_type") ?? "Minion";
