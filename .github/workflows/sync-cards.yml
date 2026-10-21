@@ -1,0 +1,25 @@
+name: Sync cards data (prod)
+
+# Déclenchement manuel uniquement (jamais sur push) : applique
+# backend/src/database/cards_data.sql à la base de prod via la contrepartie
+# non destructive de migrate.ts (syncCardsData.ts, voir son en-tête) — UPDATE
+# par nom pour les cartes existantes, INSERT pour les nouvelles, aucune ligne
+# jamais supprimée. À lancer après un merge qui régénère cards_data.sql
+# (scripts/generate-cards-data.mjs) une fois le déploiement terminé, pour que
+# la base de prod reflète le texte/les stats actuels des cartes sans
+# nécessiter d'accès SSH manuel (voir "Appliquer un changement de schéma en
+# prod" dans CLAUDE.md pour le contexte).
+on:
+  workflow_dispatch: {}
+
+jobs:
+  sync-cards:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run syncCardsData.js on the VPS
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: cd /var/www/wyrdane-backend && docker compose exec -T backend node dist/database/syncCardsData.js
