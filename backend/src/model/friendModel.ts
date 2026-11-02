@@ -28,6 +28,7 @@ interface FriendRow extends RowDataPacket {
 	friendship_id: number;
 	id: number;
 	username: string;
+	level: number;
 	steam_id: string | null;
 	presence: "online" | "in_game" | "offline";
 }
@@ -122,7 +123,7 @@ const getFriends = async (userId: number): Promise<FriendRow[]> => {
 	const [rows] = await db.query<FriendRow[]>(
 		`SELECT
 		   f.id AS friendship_id,
-		   u.id, u.username,
+		   u.id, u.username, u.level,
 		   la.external_id AS steam_id,
 		   CASE
 		     WHEN u.last_heartbeat_at IS NULL OR u.last_heartbeat_at < NOW() - INTERVAL ? SECOND THEN 'offline'
