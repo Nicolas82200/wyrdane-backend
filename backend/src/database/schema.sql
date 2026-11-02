@@ -312,6 +312,7 @@ CREATE TABLE match_reports (
   mode VARCHAR(10) NOT NULL DEFAULT 'ranked',
   season INT NOT NULL,
   cards_played_by_race JSON NULL,
+  resource_cards_by_race JSON NULL,
   deck_races JSON NULL,
   -- Liste brute des cartes posées par le reporter (doublons inclus si jouée
   -- plusieurs fois), utilisée une fois le match confirmé pour alimenter
@@ -620,6 +621,17 @@ CREATE TABLE game_invites (
   FOREIGN KEY (recipient_id) REFERENCES users(id) ON DELETE CASCADE,
   INDEX idx_game_invites_recipient_status (recipient_id, status),
   INDEX idx_game_invites_sender_status (sender_id, status)
+);
+
+-- Stock de packs par race (voir docs/backend-contracts/race-packs.md côté
+-- card-game). Ne porte QUE les races réelles : le stock multirace reste
+-- users.free_packs. Le `free_packs` renvoyé au client est la somme des deux.
+CREATE TABLE user_pack_stock (
+  user_id INT NOT NULL,
+  race VARCHAR(20) NOT NULL,
+  quantity INT NOT NULL DEFAULT 0,
+  PRIMARY KEY (user_id, race),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
 INSERT INTO wishlist_stats (id, count) VALUES (1, 0);

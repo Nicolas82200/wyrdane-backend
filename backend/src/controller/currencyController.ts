@@ -1,6 +1,6 @@
 import { Request, Response } from "express";
 
-import { getBalance, getFreePacks, claimStarterBonus, claimFirstLoginReward } from "../model/currencyModel";
+import { getBalance, getFreePacksByRace, claimStarterBonus, claimFirstLoginReward } from "../model/currencyModel";
 import { getUserId } from "../helper/requestUser";
 
 const getMyBalance = async (req: Request, res: Response): Promise<void> => {
@@ -11,8 +11,11 @@ const getMyBalance = async (req: Request, res: Response): Promise<void> => {
 			return;
 		}
 
-		const [balance, freePacks] = await Promise.all([getBalance(userId), getFreePacks(userId)]);
-		res.status(200).json({ balance, free_packs: freePacks });
+		const [balance, freePacksByRace] = await Promise.all([getBalance(userId), getFreePacksByRace(userId)]);
+		// free_packs reste la somme : c'est elle que lit le client qui n'a pas
+		// besoin du détail (pastille du menu principal).
+		const freePacks = Object.values(freePacksByRace).reduce((sum, quantity) => sum + quantity, 0);
+		res.status(200).json({ balance, free_packs: freePacks, free_packs_by_race: freePacksByRace });
 	} catch (error) {
 		console.error(error);
 		res.status(500).json({ message: "Server error" });

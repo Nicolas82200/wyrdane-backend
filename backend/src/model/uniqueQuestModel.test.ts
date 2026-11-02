@@ -201,12 +201,12 @@ describe("getUniqueQuests", () => {
 describe("progressForMatch", () => {
 	beforeEach(() => vi.clearAllMocks());
 
-	it("increments a 'play' quest regardless of mode or outcome", async () => {
+	it("increments a 'play' quest on a matched multiplayer match, won or lost", async () => {
 		const template = UNIQUE_QUEST_TEMPLATES.find((t) => t.objective === "play")!;
 		queueEnsureUniqueQuests([templateRow({ quest_code: template.code, progress: 0, target: template.target })]);
 		mockedDb.query.mockResolvedValueOnce([{}]);
 
-		await progressForMatch(1, "solo", false);
+		await progressForMatch(1, "ranked", false);
 
 		expect(mockedDb.query).toHaveBeenLastCalledWith(expect.stringContaining("SET progress = LEAST"), [1]);
 	});
@@ -226,7 +226,7 @@ describe("progressForMatch", () => {
 		queueEnsureUniqueQuests([templateRow({ quest_code: template.code, progress: 0, target: template.target })]);
 		mockedDb.query.mockResolvedValueOnce([{}]);
 
-		await progressForMatch(1, "solo", false, { deckRaces: ["Demon", "Human"] });
+		await progressForMatch(1, "ranked", false, { deckRaces: ["Demon", "Human"] });
 
 		expect(mockedDb.query).toHaveBeenLastCalledWith(expect.stringContaining("SET progress = target"), [1]);
 	});
@@ -235,7 +235,7 @@ describe("progressForMatch", () => {
 		const template = UNIQUE_QUEST_TEMPLATES.find((t) => t.objective === "win_multirace_first")!;
 		queueEnsureUniqueQuests([templateRow({ quest_code: template.code, progress: 0, target: template.target })]);
 
-		await progressForMatch(1, "solo", true, { deckRaces: ["Demon"] });
+		await progressForMatch(1, "ranked", true, { deckRaces: ["Demon"] });
 
 		expect(mockedDb.query).not.toHaveBeenCalledWith(expect.stringContaining("SET progress"), expect.anything());
 	});
@@ -247,7 +247,7 @@ describe("progressForMatch", () => {
 		]);
 		mockedDb.query.mockResolvedValueOnce([{}]);
 
-		await progressForMatch(1, "solo", true, { deckRaces: ["Human", "Demon"] });
+		await progressForMatch(1, "ranked", true, { deckRaces: ["Human", "Demon"] });
 
 		expect(mockedDb.query).toHaveBeenLastCalledWith(
 			expect.stringContaining("progress = ?, meta = ?"),
@@ -262,9 +262,18 @@ describe("progressForMatch", () => {
 			templateRow({ id: 2, quest_code: template.code, progress: 0, target: template.target, claimed_at: "2026-08-24T00:00:00Z" }),
 		]);
 
-		await progressForMatch(1, "solo", false);
+		await progressForMatch(1, "ranked", false);
 
 		expect(mockedDb.query).not.toHaveBeenCalledWith(expect.stringContaining("SET progress"), expect.anything());
+	});
+
+	// Décision produit 2026-11-02 : aucune quête unique de partie ne progresse
+	// hors multijoueur apparié — la garde est en tête de fonction, donc aucune
+	// requête n'est même émise.
+	it.each(["solo", "friendly"] as const)("does not touch any quest in %s mode", async (mode) => {
+		await progressForMatch(1, mode, true, { deckRaces: ["Demon", "Human"] });
+
+		expect(mockedDb.query).not.toHaveBeenCalled();
 	});
 });
 

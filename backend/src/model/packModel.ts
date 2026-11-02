@@ -2,8 +2,20 @@ import type { RowDataPacket } from "mysql2";
 import type { PoolConnection } from "mysql2/promise";
 import db from "./db";
 import { grantCard, getOwnedQuantity, findOwnedCardIds, MAX_COPIES_PER_CARD, DUST_VALUE_BY_RARITY } from "./collectionModel";
-import { credit, debit, debitFreePack, creditFreePacks, getBalance, getFreePacks } from "./currencyModel";
+import {
+	credit,
+	debit,
+	debitFreePack,
+	creditFreePacks,
+	getBalance,
+	getFreePacks,
+	getFreePacksByRace,
+	isPackRace,
+	MULTIRACE_PACK,
+	UnknownPackRaceError,
+} from "./currencyModel";
 import { progressForPackOpen } from "./uniqueQuestModel";
+import { progressForPackOpen as progressMonthlyForPackOpen } from "./monthlyQuestModel";
 import { progressForPackPurchase } from "./onboardingQuestModel";
 import { getLevel } from "./levelModel";
 
@@ -59,9 +71,19 @@ interface DrawResult extends DrawableCardRow {
 
 // Les cartes-ressource ne sont pas de vraies récompenses de collection (une
 // poignée par race, déjà données par claim-starter) : exclues du pool.
-const fetchDrawablePool = async (): Promise<DrawableCardRow[]> => {
+// `race` vaut multirace (ou est omis) : tirage dans toutes les races, comme
+// avant. Sinon le pool est restreint à cette race, pondération par rareté
+// inchangée (voir docs/backend-contracts/race-packs.md côté card-game).
+const fetchDrawablePool = async (race: string = MULTIRACE_PACK): Promise<DrawableCardRow[]> => {
+	if (race === MULTIRACE_PACK) {
+		const [rows] = await db.query<DrawableCardRow[]>(
+			"SELECT * FROM cards WHERE card_type != 'Ressource'",
+		);
+		return rows;
+	}
 	const [rows] = await db.query<DrawableCardRow[]>(
-		"SELECT * FROM cards WHERE card_type != 'Ressource'",
+		"SELECT * FROM cards WHERE card_type != 'Ressource' AND race = ?",
+		[race],
 	);
 	return rows;
 };
@@ -167,6 +189,7 @@ const openPack = async (userId: number, free = false): Promise<{ cards: DrawResu
 		// ni faire échouer la réponse au client, qui a bien reçu son pack.
 		try {
 			await progressForPackOpen(userId);
+			await progressMonthlyForPackOpen(userId);
 			if (!free) {
 				const { level } = await getLevel(userId);
 				await progressForPackPurchase(userId, level);
@@ -186,25 +209,34 @@ const openPack = async (userId: number, free = false): Promise<{ cards: DrawResu
 // Ouvre un pack en consommant le solde de packs gratuits (quêtes hebdo,
 // parrainage — voir weeklyQuestModel/referralModel) plutôt que l'or ; mêmes
 // probabilités de tirage que openPack, seule la source de débit change.
-const openOwnedPack = async (userId: number): Promise<{ cards: DrawResult[]; free_packs: number }> => {
-	const pool = await fetchDrawablePool();
+const openOwnedPack = async (
+	userId: number,
+	race: string = MULTIRACE_PACK,
+): Promise<{ cards: DrawResult[]; free_packs: number; free_packs_by_race: Record<string, number> }> => {
+	if (!isPackRace(race)) throw new UnknownPackRaceError();
+	const pool = await fetchDrawablePool(race);
 	if (pool.length === 0) throw new Error("Aucune carte disponible pour un pack");
 
 	const connection = await db.getConnection();
 	try {
 		await connection.beginTransaction();
 
-		await debitFreePack(userId, connection);
+		await debitFreePack(userId, connection, race);
 		const results = await drawAndGrantCards(userId, pool, connection);
 
 		await connection.commit();
 		// Voir openPack ci-dessus : hors du try/catch transactionnel, même raison.
 		try {
 			await progressForPackOpen(userId);
+			await progressMonthlyForPackOpen(userId);
 		} catch (error) {
 			console.error("openOwnedPack: échec de la progression de quête après commit", error);
 		}
-		return { cards: results, free_packs: await getFreePacks(userId) };
+		return {
+			cards: results,
+			free_packs: await getFreePacks(userId),
+			free_packs_by_race: await getFreePacksByRace(userId),
+		};
 	} catch (error) {
 		await connection.rollback();
 		throw error;
@@ -220,14 +252,25 @@ const openOwnedPack = async (userId: number): Promise<{ cards: DrawResult[]; fre
 // via openOwnedPack, les consomme ensuite, un par un côté client comme pour
 // les packs gratuits). Transaction unique comme openPack : débit et crédit ne
 // doivent jamais être partiels.
-const buyPacks = async (userId: number, quantity: number): Promise<{ balance: number; free_packs: number }> => {
+// `race` omis = multirace (builds antérieures). Le prix ne dépend pas de la
+// race : un pack ciblé n'est pas plus cher, il est juste plus ciblé.
+const buyPacks = async (
+	userId: number,
+	quantity: number,
+	race: string = MULTIRACE_PACK,
+): Promise<{ balance: number; free_packs: number; free_packs_by_race: Record<string, number> }> => {
+	if (!isPackRace(race)) throw new UnknownPackRaceError();
 	const connection = await db.getConnection();
 	try {
 		await connection.beginTransaction();
 		await debit(userId, PACK_COST * quantity, "pack_buy", undefined, connection);
-		await creditFreePacks(userId, quantity, connection);
+		await creditFreePacks(userId, quantity, connection, race);
 		await connection.commit();
-		return { balance: await getBalance(userId), free_packs: await getFreePacks(userId) };
+		return {
+			balance: await getBalance(userId),
+			free_packs: await getFreePacks(userId),
+			free_packs_by_race: await getFreePacksByRace(userId),
+		};
 	} catch (error) {
 		await connection.rollback();
 		throw error;

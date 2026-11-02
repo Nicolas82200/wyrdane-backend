@@ -27,6 +27,11 @@ const reportSoloMatch = async (req: Request, res: Response): Promise<void> => {
 		const rawBody = req.body as {
 			result?: "victory" | "defeat";
 			cardsPlayedByRace?: Record<string, number>;
+			// Seule donnée de ce rapport qui serve encore à quelque chose en
+			// solo : la quête-ressource quotidienne progresse dans tous les
+			// modes (voir questModel.progressForMatch). Les quêtes de parties,
+			// elles, ignorent le solo depuis le 2026-11-02.
+			resourceCardsByRace?: Record<string, number>;
 			deckRaces?: string[];
 		};
 		if (rawBody.result !== "victory" && rawBody.result !== "defeat") {
@@ -35,13 +40,15 @@ const reportSoloMatch = async (req: Request, res: Response): Promise<void> => {
 		}
 
 		const cardsPlayedByRace = sanitizeCardsPlayedByRace(rawBody.cardsPlayedByRace);
+		const resourceCardsByRace = sanitizeCardsPlayedByRace(rawBody.resourceCardsByRace);
 		const deckRaces = sanitizeDeckRaces(rawBody.deckRaces);
 
 		const won = rawBody.result === "victory";
 		const winStreak = await incrementResult(userId, won);
-		await progressForMatch(userId, "solo", won, { cardsPlayedByRace, deckRaces });
-		await progressWeeklyForMatch(userId, "solo", won, { cardsPlayedByRace, deckRaces });
-		await progressMonthlyForMatch(userId, "solo", won, { cardsPlayedByRace, deckRaces });
+		const raceData = { cardsPlayedByRace, resourceCardsByRace, deckRaces };
+		await progressForMatch(userId, "solo", won, raceData);
+		await progressWeeklyForMatch(userId, "solo", won, raceData);
+		await progressMonthlyForMatch(userId, "solo", won, raceData);
 		await progressUniqueForMatch(userId, "solo", won, { deckRaces });
 		const { level } = await getLevel(userId);
 		await progressOnboardingForMatch(userId, level, "solo", won);

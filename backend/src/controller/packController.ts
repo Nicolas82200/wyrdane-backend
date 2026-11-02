@@ -1,9 +1,21 @@
 import { Request, Response } from "express";
 
 import { openPack, openOwnedPack, buyPacks, PACK_COST, MAX_BUY_QUANTITY } from "../model/packModel";
-import { InsufficientFundsError, InsufficientFreePacksError } from "../model/currencyModel";
+import {
+	InsufficientFundsError,
+	InsufficientFreePacksError,
+	UnknownPackRaceError,
+	MULTIRACE_PACK,
+} from "../model/currencyModel";
 import { progressForPackOpen } from "../model/uniqueQuestModel";
 import { getUserId } from "../helper/requestUser";
+
+// `race` absent = multirace, pour les builds antérieures qui n'envoient pas ce
+// champ. Toute autre valeur est rejetée plus bas par le modèle (jamais
+// réinterprétée en multirace : un client modifié ne doit pas pouvoir inventer
+// une catégorie de stock).
+const packRaceFromBody = (value: unknown): string =>
+	value === undefined || value === null ? MULTIRACE_PACK : String(value);
 
 const handleOpenPack = async (req: Request, res: Response, free: boolean): Promise<void> => {
 	try {
@@ -50,12 +62,19 @@ const openOwnedPackHandler = async (req: Request, res: Response): Promise<void> 
 			return;
 		}
 
-		const { cards, free_packs } = await openOwnedPack(userId);
+		const race = packRaceFromBody(req.body?.race);
+		const { cards, free_packs, free_packs_by_race } = await openOwnedPack(userId, race);
 		await progressForPackOpen(userId, cards.length);
-		res.status(200).json({ cards, free_packs });
+		res.status(200).json({ cards, free_packs, free_packs_by_race });
 	} catch (error) {
-		if (error instanceof InsufficientFreePacksError) {
+		if (error instanceof UnknownPackRaceError) {
 			res.status(400).json({ message: error.message });
+			return;
+		}
+		if (error instanceof InsufficientFreePacksError) {
+			// Stock de cette race vide : refus net, jamais de repli sur une
+			// autre catégorie (contrat race-packs.md).
+			res.status(409).json({ message: error.message });
 			return;
 		}
 		console.error(error);
@@ -81,9 +100,14 @@ const buyPacksHandler = async (req: Request, res: Response): Promise<void> => {
 			return;
 		}
 
-		const { balance, free_packs } = await buyPacks(userId, quantity);
-		res.status(200).json({ balance, free_packs });
+		const race = packRaceFromBody(req.body?.race);
+		const { balance, free_packs, free_packs_by_race } = await buyPacks(userId, quantity, race);
+		res.status(200).json({ balance, free_packs, free_packs_by_race });
 	} catch (error) {
+		if (error instanceof UnknownPackRaceError) {
+			res.status(400).json({ message: error.message });
+			return;
+		}
 		if (error instanceof InsufficientFundsError) {
 			res.status(400).json({ message: `Solde insuffisant (coût : ${PACK_COST})` });
 			return;

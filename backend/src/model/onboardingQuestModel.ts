@@ -1,6 +1,7 @@
 import type { RowDataPacket } from "mysql2";
 import db from "./db";
 import { credit, getBalance, creditFreePacks, getFreePacks } from "./currencyModel";
+import { countsForMatchQuests, isRankedMatch, type QuestMatchMode } from "./questMatchMode";
 
 // Piste de progression réservée aux nouveaux joueurs (niveau de compte 1 à
 // 25) : même principe que unique_quests (catalogue en code, une ligne par
@@ -176,21 +177,23 @@ interface MatchRaceData {
 const progressForMatch = async (
 	userId: number,
 	currentLevel: number,
-	mode: "solo" | "ranked",
+	mode: QuestMatchMode,
 	won: boolean,
 	_raceData: MatchRaceData = {},
 ): Promise<void> => {
+	// Même garde que uniqueQuestModel.progressForMatch : tous les objectifs
+	// traités ici sont des quêtes de partie, ni l'IA ni une invitation d'ami ne
+	// les font progresser. reach_level/buy_packs ont leurs propres entrées.
+	if (!countsForMatchQuests(mode)) return;
 	const quests = await ensureOnboardingQuests(userId, currentLevel);
 	for (const quest of quests) {
 		if (quest.claimed_at !== null || quest.progress >= quest.target) continue;
 		const template = templateByCode(quest.quest_code);
 		if (!template) continue;
 
-		if (template.objective === "win" && won) {
+		if ((template.objective === "win" && won) || template.objective === "play_network") {
 			await db.query("UPDATE onboarding_quests SET progress = LEAST(progress + 1, target) WHERE id = ?", [quest.id]);
-		} else if (template.objective === "win_ranked" && won && mode === "ranked") {
-			await db.query("UPDATE onboarding_quests SET progress = LEAST(progress + 1, target) WHERE id = ?", [quest.id]);
-		} else if (template.objective === "play_network" && mode === "ranked") {
+		} else if (template.objective === "win_ranked" && won && isRankedMatch(mode)) {
 			await db.query("UPDATE onboarding_quests SET progress = LEAST(progress + 1, target) WHERE id = ?", [quest.id]);
 		}
 	}

@@ -1,6 +1,8 @@
 import type { RowDataPacket } from "mysql2";
 import db from "./db";
 import { credit, getBalance } from "./currencyModel";
+import { applyXp } from "./levelModel";
+import { countsForMatchQuests, type QuestMatchMode } from "./questMatchMode";
 
 // Catalogue des quêtes possibles : en code plutôt qu'en table, même logique
 // que les montants de récompense dans rewardsController (config figée par
@@ -8,54 +10,60 @@ import { credit, getBalance } from "./currencyModel";
 // l'assignation/progression par joueur, pas la définition de la quête.
 interface QuestTemplate {
 	code: string;
-	objective: "play" | "win" | "win_ranked" | "play_race" | "win_race";
+	objective: "play" | "win" | "login" | "play_resource_race";
 	target: number;
 	rewardCurrency: number;
+	rewardXp: number;
 	descriptionKey: string;
-	// Uniquement pour play_race/win_race : nom de race tel qu'utilisé côté
+	// Uniquement pour play_resource_race : nom de race tel qu'utilisé côté
 	// client (Race.get_race_name — "Human"/"Undead"/"Demon"/"Abomination").
 	race?: string;
 }
 
-// Races jouables (voir Race.get_implemented_races côté client) pour lesquelles
-// une paire de quêtes play_race/win_race est générée ci-dessous.
-const IMPLEMENTED_RACES = ["Human", "Undead", "Demon", "Abomination"] as const;
+// Races jouables (voir Race.get_implemented_races côté client), dans l'ordre
+// de rotation de la quête-ressource du jour.
+const IMPLEMENTED_RACES = ["Undead", "Human", "Demon", "Abomination"] as const;
 
-const raceQuestTemplates = (): QuestTemplate[] =>
-	IMPLEMENTED_RACES.flatMap((race) => [
-		{
-			code: `play_race_${race.toLowerCase()}_10`,
-			objective: "play_race" as const,
-			race,
-			target: 10,
-			rewardCurrency: 50,
-			descriptionKey: `QUEST_PLAY_RACE_${race.toUpperCase()}_10`,
-		},
-		{
-			code: `win_race_${race.toLowerCase()}_2`,
-			objective: "win_race" as const,
-			race,
-			target: 2,
-			rewardCurrency: 75,
-			descriptionKey: `QUEST_WIN_RACE_${race.toUpperCase()}_2`,
-		},
-	]);
-
-// Recompenses calees sur une echelle unique de 25/50/75/100 depuis le
-// 2026-09-28 (auparavant 30/40/50/60/70/80, sans logique apparente entre deux
-// quetes de difficulte voisine) : le palier suit la difficulte reelle -- 25
-// pour la quete qu'une session normale valide sans y penser, 100 pour la seule
-// qui impose de jouer en classe.
-const QUEST_TEMPLATES: QuestTemplate[] = [
-	{ code: "play_3", objective: "play", target: 3, rewardCurrency: 25, descriptionKey: "QUEST_PLAY_3" },
-	{ code: "play_5", objective: "play", target: 5, rewardCurrency: 50, descriptionKey: "QUEST_PLAY_5" },
-	{ code: "win_2", objective: "win", target: 2, rewardCurrency: 50, descriptionKey: "QUEST_WIN_2" },
-	{ code: "win_3", objective: "win", target: 3, rewardCurrency: 75, descriptionKey: "QUEST_WIN_3" },
-	{ code: "win_ranked_1", objective: "win_ranked", target: 1, rewardCurrency: 100, descriptionKey: "QUEST_WIN_RANKED_1" },
-	...raceQuestTemplates(),
+// Refonte du 2026-11-02 : plus de tirage parmi un grand catalogue, mais
+// QUESTS_PER_DAY quêtes FIXES assignées à tout le monde chaque jour. La
+// rotation d'avant (3 tirées parmi 13, graine userId + jour) avait une période
+// de 13 jours — un joueur revoyait la même séquence à l'identique — et
+// imposait au hasard des quêtes de race invalidables pour un deck mono-race.
+// Seule la quête-ressource tourne désormais, sur la race du jour, et elle est
+// la même pour tous les joueurs.
+//
+// Trois quêtes paient en or, une en XP (la quête-ressource) : voir
+// docs/economy.md pour le barème complet et le revenu attendu.
+const FIXED_DAILY_TEMPLATES: QuestTemplate[] = [
+	{ code: "play_3", objective: "play", target: 3, rewardCurrency: 50, rewardXp: 0, descriptionKey: "QUEST_PLAY_3" },
+	{ code: "win_1", objective: "win", target: 1, rewardCurrency: 50, rewardXp: 0, descriptionKey: "QUEST_WIN_1" },
+	{ code: "login_1", objective: "login", target: 1, rewardCurrency: 50, rewardXp: 0, descriptionKey: "QUEST_LOGIN_1" },
 ];
 
-const QUESTS_PER_DAY = 3;
+// Quête-ressource du jour : même race pour tous les joueurs, elle change
+// chaque jour (la graine ne contient volontairement pas l'userId).
+const resourceQuestTemplate = (day: number): QuestTemplate => {
+	const race = IMPLEMENTED_RACES[day % IMPLEMENTED_RACES.length];
+	return {
+		code: `play_resource_${race.toLowerCase()}_10`,
+		objective: "play_resource_race",
+		race,
+		target: 10,
+		rewardCurrency: 0,
+		rewardXp: 25,
+		descriptionKey: `QUEST_PLAY_RESOURCE_${race.toUpperCase()}_10`,
+	};
+};
+
+// Tous les templates qu'un jour peut produire — sert à retrouver le template
+// d'une ligne en base, y compris celle d'hier (la quête-ressource d'un autre
+// jour) tant qu'elle n'a pas été purgée.
+const QUEST_TEMPLATES: QuestTemplate[] = [
+	...FIXED_DAILY_TEMPLATES,
+	...IMPLEMENTED_RACES.map((_, index) => resourceQuestTemplate(index)),
+];
+
+const QUESTS_PER_DAY = 4;
 
 interface DailyQuestRow extends RowDataPacket {
 	id: number;
@@ -66,6 +74,7 @@ interface DailyQuestRow extends RowDataPacket {
 	progress: number;
 	target: number;
 	reward_currency: number;
+	reward_xp: number;
 	claimed_at: string | null;
 }
 
@@ -76,6 +85,7 @@ interface DailyQuestsResponse {
 		progress: number;
 		target: number;
 		reward_currency: number;
+		reward_xp: number;
 		claimed: boolean;
 	}[];
 	resets_at: string;
@@ -106,33 +116,27 @@ const templateByCode = (code: string): QuestTemplate | undefined =>
 	QUEST_TEMPLATES.find((template) => template.code === code);
 
 // Nombre de jours écoulés depuis l'epoch (heure serveur) : sert de graine de
-// rotation, pas de vraie date affichée.
+// rotation de la quête-ressource, pas de vraie date affichée.
 const dayNumber = (): number => Math.floor(Date.now() / 86400000);
 
-// Rotation déterministe (aucun RNG stocké) : pour un joueur et un jour donnés,
-// toujours le même triplet de quêtes, dès le premier calcul — pas besoin
-// d'avoir déjà écrit en base pour le prédire.
-const pickTemplatesFor = (userId: number, day: number): QuestTemplate[] => {
-	const seed = userId + day;
-	const picked: QuestTemplate[] = [];
-	for (let slot = 0; slot < QUESTS_PER_DAY; slot++) {
-		picked.push(QUEST_TEMPLATES[(seed + slot) % QUEST_TEMPLATES.length]);
-	}
-	return picked;
-};
+// Les quêtes du jour : les trois fixes, puis la quête-ressource du jour.
+const templatesForDay = (day: number): QuestTemplate[] => [
+	...FIXED_DAILY_TEMPLATES,
+	resourceQuestTemplate(day),
+];
 
 // Assigne les QUESTS_PER_DAY quêtes du jour au premier appel de la journée pour ce joueur
 // (paresseux, même pattern que rankedModel.getStats/solo_stats.getStats),
 // puis les renvoie — idempotent, un second appel le même jour ne change rien.
 const ensureTodayQuests = async (userId: number): Promise<DailyQuestRow[]> => {
-	const templates = pickTemplatesFor(userId, dayNumber());
+	const templates = templatesForDay(dayNumber());
 	for (let slot = 0; slot < templates.length; slot++) {
 		const template = templates[slot];
 		await db.query(
-			`INSERT INTO daily_quests (user_id, quest_date, slot, quest_code, progress, target, reward_currency)
-			 VALUES (?, CURDATE(), ?, ?, 0, ?, ?)
+			`INSERT INTO daily_quests (user_id, quest_date, slot, quest_code, progress, target, reward_currency, reward_xp)
+			 VALUES (?, CURDATE(), ?, ?, 0, ?, ?, ?)
 			 ON DUPLICATE KEY UPDATE user_id = user_id`,
-			[userId, slot, template.code, template.target, template.rewardCurrency],
+			[userId, slot, template.code, template.target, template.rewardCurrency, template.rewardXp],
 		);
 	}
 	const [rows] = await db.query<DailyQuestRow[]>(
@@ -154,6 +158,7 @@ const getDailyQuests = async (userId: number): Promise<DailyQuestsResponse> => {
 			progress: quest.progress,
 			target: quest.target,
 			reward_currency: quest.reward_currency,
+			reward_xp: quest.reward_xp ?? 0,
 			claimed: quest.claimed_at !== null,
 		})),
 		resets_at: resetsAt.toISOString(),
@@ -162,8 +167,12 @@ const getDailyQuests = async (userId: number): Promise<DailyQuestsResponse> => {
 
 interface MatchRaceData {
 	// Nombre de cartes jouées pendant le match, par race — alimente les
-	// quêtes play_race quel que soit le résultat du match.
+	// quêtes play_race (hebdomadaires/mensuelles) quel que soit le résultat.
 	cardsPlayedByRace?: Record<string, number>;
+	// Nombre de cartes-RESSOURCE jouées pendant le match, par race, compté à
+	// part de cardsPlayedByRace : une quête « jouez 10 Sceaux » ne doit pas
+	// être validée par des serviteurs Humains, ni l'inverse.
+	resourceCardsByRace?: Record<string, number>;
 	// Races présentes dans le deck utilisé pour ce match — alimente les
 	// quêtes win_race, uniquement sur une victoire.
 	deckRaces?: string[];
@@ -177,7 +186,7 @@ interface MatchRaceData {
 // quêtes déjà au maximum ou déjà réclamées.
 const progressForMatch = async (
 	userId: number,
-	mode: "solo" | "ranked",
+	mode: QuestMatchMode,
 	won: boolean,
 	raceData: MatchRaceData = {},
 ): Promise<void> => {
@@ -187,18 +196,32 @@ const progressForMatch = async (
 		const template = templateByCode(quest.quest_code);
 		if (!template) continue;
 
-		if (template.objective === "play" || (template.objective === "win" && won)) {
+		if (template.objective === "play" || template.objective === "win") {
+			// Ni l'IA ni une invitation d'ami ne comptent (voir questMatchMode).
+			if (!countsForMatchQuests(mode)) continue;
+			if (template.objective === "win" && !won) continue;
 			await db.query("UPDATE daily_quests SET progress = LEAST(progress + 1, target) WHERE id = ?", [quest.id]);
-		} else if (template.objective === "win_ranked" && won && mode === "ranked") {
-			await db.query("UPDATE daily_quests SET progress = LEAST(progress + 1, target) WHERE id = ?", [quest.id]);
-		} else if (template.objective === "play_race" && template.race) {
-			const count = raceData.cardsPlayedByRace?.[template.race] ?? 0;
+		} else if (template.objective === "play_resource_race" && template.race) {
+			// Cartes-ressource uniquement, comptées dans TOUS les modes : rien
+			// n'empêche de les jouer contre l'IA, et il n'y a rien à y gagner
+			// d'autre que la quête.
+			const count = raceData.resourceCardsByRace?.[template.race] ?? 0;
 			if (count <= 0) continue;
 			await db.query("UPDATE daily_quests SET progress = LEAST(progress + ?, target) WHERE id = ?", [count, quest.id]);
-		} else if (template.objective === "win_race" && template.race && won) {
-			if (!raceData.deckRaces?.includes(template.race)) continue;
-			await db.query("UPDATE daily_quests SET progress = LEAST(progress + 1, target) WHERE id = ?", [quest.id]);
 		}
+	}
+};
+
+// Progression de la quête de connexion du jour — appelée à chaque
+// authentification réussie (authController.loginWithSteamId), jamais depuis un
+// résultat de match. Remplace la popup de récompense de connexion, désormais
+// une simple ligne de l'onglet Quêtes (décision produit 2026-11-02).
+const progressForLogin = async (userId: number): Promise<void> => {
+	const quests = await ensureTodayQuests(userId);
+	for (const quest of quests) {
+		if (quest.claimed_at !== null || quest.progress >= quest.target) continue;
+		if (templateByCode(quest.quest_code)?.objective !== "login") continue;
+		await db.query("UPDATE daily_quests SET progress = target WHERE id = ?", [quest.id]);
 	}
 };
 
@@ -208,8 +231,9 @@ const progressForMatch = async (
 const claimQuest = async (
 	userId: number,
 	questId: number,
-): Promise<{ balance: number; reward_currency: number }> => {
+): Promise<{ balance: number; reward_currency: number; reward_xp: number }> => {
 	const connection = await db.getConnection();
+	let rewardXp = 0;
 	try {
 		await connection.beginTransaction();
 
@@ -222,11 +246,18 @@ const claimQuest = async (
 		if (quest.claimed_at !== null) throw new QuestAlreadyClaimedError();
 		if (quest.progress < quest.target) throw new QuestNotCompletedError();
 
+		rewardXp = quest.reward_xp ?? 0;
 		await connection.query("UPDATE daily_quests SET claimed_at = NOW() WHERE id = ?", [questId]);
-		await credit(userId, quest.reward_currency, "daily_quest_claim", String(questId), connection);
+		if (quest.reward_currency > 0) {
+			await credit(userId, quest.reward_currency, "daily_quest_claim", String(questId), connection);
+		}
+		// L'XP est créditée DANS la transaction : un passage de niveau octroie
+		// une récompense de palier (carte/pack/or), qui doit vivre ou mourir
+		// avec la réclamation elle-même.
+		if (rewardXp > 0) await applyXp(userId, rewardXp, connection);
 
 		await connection.commit();
-		return { balance: await getBalance(userId), reward_currency: quest.reward_currency };
+		return { balance: await getBalance(userId), reward_currency: quest.reward_currency, reward_xp: rewardXp };
 	} catch (error) {
 		await connection.rollback();
 		throw error;
@@ -244,5 +275,6 @@ export {
 	ensureTodayQuests,
 	getDailyQuests,
 	progressForMatch,
+	progressForLogin,
 	claimQuest,
 };

@@ -1,6 +1,7 @@
 import type { RowDataPacket } from "mysql2";
 import db from "./db";
 import { credit, getBalance, creditFreePacks, getFreePacks } from "./currencyModel";
+import { countsForMatchQuests, isRankedMatch, type QuestMatchMode } from "./questMatchMode";
 
 // Même principe que QUEST_TEMPLATES/WEEKLY_QUEST_TEMPLATES (catalogue en
 // code, pas en base), mais ces quêtes ne resettent jamais : une ligne par
@@ -322,21 +323,25 @@ interface MatchRaceData {
 // weeklyQuestModel.progressForMatch, depuis les mêmes controllers.
 const progressForMatch = async (
 	userId: number,
-	mode: "solo" | "ranked",
+	mode: QuestMatchMode,
 	won: boolean,
 	raceData: MatchRaceData = {},
 ): Promise<void> => {
+	// TOUS les objectifs traités ici sont des quêtes de partie (jouer, gagner,
+	// première partie avec une race...) : ni l'IA ni une invitation d'ami ne
+	// les font progresser (décision produit 2026-11-02, voir questMatchMode).
+	// Les objectifs qui ne dépendent pas d'un match — open_packs, reach_tier —
+	// ont leurs propres points d'entrée, plus bas.
+	if (!countsForMatchQuests(mode)) return;
 	const quests = await ensureUniqueQuests(userId);
 	for (const quest of quests) {
 		if (quest.claimed_at !== null || quest.progress >= quest.target) continue;
 		const template = templateByCode(quest.quest_code);
 		if (!template) continue;
 
-		if (template.objective === "play") {
+		if (template.objective === "play" || (template.objective === "win" && won)) {
 			await db.query("UPDATE unique_quests SET progress = LEAST(progress + 1, target) WHERE id = ?", [quest.id]);
-		} else if (template.objective === "win" && won) {
-			await db.query("UPDATE unique_quests SET progress = LEAST(progress + 1, target) WHERE id = ?", [quest.id]);
-		} else if (template.objective === "win_ranked" && won && mode === "ranked") {
+		} else if (template.objective === "win_ranked" && won && isRankedMatch(mode)) {
 			await db.query("UPDATE unique_quests SET progress = LEAST(progress + 1, target) WHERE id = ?", [quest.id]);
 		} else if (template.objective === "play_race_first" && template.race) {
 			if (!raceData.deckRaces?.includes(template.race)) continue;

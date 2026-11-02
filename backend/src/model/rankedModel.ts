@@ -28,6 +28,7 @@ interface MatchReportRow extends RowDataPacket {
 	mode: MatchMode;
 	season: number;
 	cards_played_by_race: Record<string, number> | null;
+	resource_cards_by_race: Record<string, number> | null;
 	deck_races: string[] | null;
 	cards_played: string[] | null;
 }
@@ -57,6 +58,7 @@ interface PlayerMatchHistoryRow extends RowDataPacket {
 	duration_sec: number;
 	winner_id: number;
 	mmr_change: number;
+	mode: MatchMode | null;
 	opponent_username: string;
 	opponent_deck_races: string[] | null;
 }
@@ -103,11 +105,16 @@ const createReport = async (
 	deckRaces: string[] | null = null,
 	cardsPlayed: string[] | null = null,
 	mode: MatchMode = "ranked",
+	// Stocké pour que le PREMIER rapporteur voie sa quête-ressource progresser :
+	// les deux progressions ne sont appliquées qu'à l'arrivée du second rapport,
+	// moment où ses données ne sont plus disponibles qu'ici.
+	resourceCardsByRace: Record<string, number> | null = null,
 ): Promise<void> => {
 	await db.query(
 		`INSERT INTO match_reports
-		 (client_match_id, reporter_id, opponent_id, winner_id, mode, season, cards_played_by_race, deck_races, cards_played)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 (client_match_id, reporter_id, opponent_id, winner_id, mode, season,
+		  cards_played_by_race, resource_cards_by_race, deck_races, cards_played)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		[
 			clientMatchId,
 			reporterId,
@@ -116,6 +123,7 @@ const createReport = async (
 			mode,
 			CURRENT_SEASON,
 			cardsPlayedByRace ? JSON.stringify(cardsPlayedByRace) : null,
+			resourceCardsByRace ? JSON.stringify(resourceCardsByRace) : null,
 			deckRaces ? JSON.stringify(deckRaces) : null,
 			cardsPlayed ? JSON.stringify(cardsPlayed) : null,
 		],
@@ -327,6 +335,7 @@ const getMatchHistory = async (userId: number, limit: number): Promise<PlayerMat
 		   mh.winner_id,
 		   IF(mh.player1_id = ?, mh.mmr_change_player1, mh.mmr_change_player2) AS mmr_change,
 		   ou.username AS opponent_username,
+		   mr.mode,
 		   mr.deck_races AS opponent_deck_races
 		 FROM match_history mh
 		 JOIN users ou ON ou.id = IF(mh.player1_id = ?, mh.player2_id, mh.player1_id)

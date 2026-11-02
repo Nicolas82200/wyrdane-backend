@@ -10,6 +10,9 @@ vi.mock("./currencyModel", () => ({
 	credit: vi.fn(),
 	getBalance: vi.fn(),
 }));
+vi.mock("./levelModel", () => ({
+	applyXp: vi.fn(),
+}));
 
 import db from "./db";
 import { credit, getBalance } from "./currencyModel";
@@ -22,6 +25,7 @@ import {
 	ensureTodayQuests,
 	getDailyQuests,
 	progressForMatch,
+	progressForLogin,
 	claimQuest,
 } from "./questModel";
 
@@ -38,6 +42,7 @@ const templateRow = (overrides: Partial<Record<string, unknown>> = {}) => ({
 	progress: 0,
 	target: QUEST_TEMPLATES[0].target,
 	reward_currency: QUEST_TEMPLATES[0].rewardCurrency,
+	reward_xp: QUEST_TEMPLATES[0].rewardXp,
 	claimed_at: null,
 	...overrides,
 });
@@ -60,7 +65,7 @@ describe("ensureTodayQuests", () => {
 		expect(mockedDb.query).toHaveBeenNthCalledWith(
 			1,
 			expect.stringContaining("ON DUPLICATE KEY UPDATE"),
-			[1, 0, expect.any(String), expect.any(Number), expect.any(Number)],
+			[1, 0, expect.any(String), expect.any(Number), expect.any(Number), expect.any(Number)],
 		);
 		expect(rows).toHaveLength(3);
 	});
@@ -101,12 +106,15 @@ describe("progressForMatch", () => {
 		mockedDb.query.mockResolvedValueOnce([rows]);
 	};
 
-	it("increments a 'play' quest regardless of the match outcome", async () => {
-		const playTemplate = QUEST_TEMPLATES.find((t) => t.objective === "play")!;
+	const playTemplate = QUEST_TEMPLATES.find((t) => t.objective === "play")!;
+	const winTemplate = QUEST_TEMPLATES.find((t) => t.objective === "win")!;
+	const resourceTemplate = QUEST_TEMPLATES.find((t) => t.objective === "play_resource_race" && t.race === "Demon")!;
+
+	it("increments a 'play' quest on an matched multiplayer match, won or lost", async () => {
 		queueEnsureTodayQuests([templateRow({ quest_code: playTemplate.code, progress: 0, target: playTemplate.target })]);
 		mockedDb.query.mockResolvedValueOnce([{}]); // UPDATE progress
 
-		await progressForMatch(1, "solo", false);
+		await progressForMatch(1, "normal", false);
 
 		expect(mockedDb.query).toHaveBeenLastCalledWith(
 			expect.stringContaining("SET progress = LEAST"),
@@ -114,30 +122,32 @@ describe("progressForMatch", () => {
 		);
 	});
 
+	// Le coeur de la décision produit du 2026-11-02 : ni l'IA ni une partie sur
+	// invitation d'ami ne font progresser les quêtes de parties.
+	it.each(["solo", "friendly"] as const)("does not increment a 'play' quest in %s mode", async (mode) => {
+		queueEnsureTodayQuests([templateRow({ quest_code: playTemplate.code, progress: 0, target: playTemplate.target })]);
+
+		await progressForMatch(1, mode, true);
+
+		expect(mockedDb.query).not.toHaveBeenCalledWith(expect.stringContaining("SET progress"), expect.anything());
+	});
+
 	it("does not increment a 'win' quest on a defeat", async () => {
-		const winTemplate = QUEST_TEMPLATES.find((t) => t.objective === "win")!;
 		queueEnsureTodayQuests([templateRow({ quest_code: winTemplate.code, progress: 0, target: winTemplate.target })]);
 
-		await progressForMatch(1, "solo", false);
+		await progressForMatch(1, "ranked", false);
 
 		expect(mockedDb.query).not.toHaveBeenCalledWith(expect.stringContaining("SET progress"), expect.anything());
 	});
 
-	it("does not increment a 'win_ranked' quest on a solo win", async () => {
-		const rankedTemplate = QUEST_TEMPLATES.find((t) => t.objective === "win_ranked")!;
-		queueEnsureTodayQuests([templateRow({ quest_code: rankedTemplate.code, progress: 0, target: rankedTemplate.target })]);
-
-		await progressForMatch(1, "solo", true);
-
-		expect(mockedDb.query).not.toHaveBeenCalledWith(expect.stringContaining("SET progress"), expect.anything());
-	});
-
-	it("increments a 'play_race' quest by the number of cards played of that race, regardless of the match outcome", async () => {
-		const raceTemplate = QUEST_TEMPLATES.find((t) => t.objective === "play_race" && t.race === "Demon")!;
-		queueEnsureTodayQuests([templateRow({ quest_code: raceTemplate.code, progress: 0, target: raceTemplate.target })]);
+	it("increments the resource quest by the number of resource cards of that race, in any mode", async () => {
+		queueEnsureTodayQuests([
+			templateRow({ quest_code: resourceTemplate.code, progress: 0, target: resourceTemplate.target }),
+		]);
 		mockedDb.query.mockResolvedValueOnce([{}]); // UPDATE progress
 
-		await progressForMatch(1, "solo", false, { cardsPlayedByRace: { Demon: 4, Human: 2 } });
+		// Même en solo : rien n'empêche de jouer des ressources contre l'IA.
+		await progressForMatch(1, "solo", false, { resourceCardsByRace: { Demon: 4, Human: 2 } });
 
 		expect(mockedDb.query).toHaveBeenLastCalledWith(
 			expect.stringContaining("SET progress = LEAST"),
@@ -145,54 +155,56 @@ describe("progressForMatch", () => {
 		);
 	});
 
-	it("does not increment a 'play_race' quest when no card of that race was played", async () => {
-		const raceTemplate = QUEST_TEMPLATES.find((t) => t.objective === "play_race" && t.race === "Demon")!;
-		queueEnsureTodayQuests([templateRow({ quest_code: raceTemplate.code, progress: 0, target: raceTemplate.target })]);
+	// Garde-fou du découplage : les ressources sont comptées à part, un
+	// serviteur Démon ne valide pas la quête des Âmes.
+	it("ignores non-resource cards of the same race", async () => {
+		queueEnsureTodayQuests([
+			templateRow({ quest_code: resourceTemplate.code, progress: 0, target: resourceTemplate.target }),
+		]);
 
-		await progressForMatch(1, "solo", false, { cardsPlayedByRace: { Human: 2 } });
-
-		expect(mockedDb.query).not.toHaveBeenCalledWith(expect.stringContaining("SET progress"), expect.anything());
-	});
-
-	it("increments a 'win_race' quest on a win with a deck containing that race", async () => {
-		const raceTemplate = QUEST_TEMPLATES.find((t) => t.objective === "win_race" && t.race === "Undead")!;
-		queueEnsureTodayQuests([templateRow({ quest_code: raceTemplate.code, progress: 0, target: raceTemplate.target })]);
-		mockedDb.query.mockResolvedValueOnce([{}]); // UPDATE progress
-
-		await progressForMatch(1, "solo", true, { deckRaces: ["Undead", "Human"] });
-
-		expect(mockedDb.query).toHaveBeenLastCalledWith(
-			expect.stringContaining("SET progress = LEAST"),
-			[1],
-		);
-	});
-
-	it("does not increment a 'win_race' quest on a loss, even with a matching deck", async () => {
-		const raceTemplate = QUEST_TEMPLATES.find((t) => t.objective === "win_race" && t.race === "Undead")!;
-		queueEnsureTodayQuests([templateRow({ quest_code: raceTemplate.code, progress: 0, target: raceTemplate.target })]);
-
-		await progressForMatch(1, "solo", false, { deckRaces: ["Undead"] });
-
-		expect(mockedDb.query).not.toHaveBeenCalledWith(expect.stringContaining("SET progress"), expect.anything());
-	});
-
-	it("does not increment a 'win_race' quest when the deck doesn't contain that race", async () => {
-		const raceTemplate = QUEST_TEMPLATES.find((t) => t.objective === "win_race" && t.race === "Undead")!;
-		queueEnsureTodayQuests([templateRow({ quest_code: raceTemplate.code, progress: 0, target: raceTemplate.target })]);
-
-		await progressForMatch(1, "solo", true, { deckRaces: ["Demon"] });
+		await progressForMatch(1, "ranked", false, { cardsPlayedByRace: { Demon: 9 } });
 
 		expect(mockedDb.query).not.toHaveBeenCalledWith(expect.stringContaining("SET progress"), expect.anything());
 	});
 
 	it("skips quests that are already at their target or already claimed", async () => {
-		const playTemplate = QUEST_TEMPLATES.find((t) => t.objective === "play")!;
 		queueEnsureTodayQuests([
 			templateRow({ id: 1, quest_code: playTemplate.code, progress: playTemplate.target, target: playTemplate.target }),
 			templateRow({ id: 2, quest_code: playTemplate.code, progress: 0, target: playTemplate.target, claimed_at: "2026-08-17T00:00:00Z" }),
 		]);
 
-		await progressForMatch(1, "solo", false);
+		await progressForMatch(1, "ranked", false);
+
+		expect(mockedDb.query).not.toHaveBeenCalledWith(expect.stringContaining("SET progress"), expect.anything());
+	});
+});
+
+describe("progressForLogin", () => {
+	beforeEach(() => vi.clearAllMocks());
+
+	const loginTemplate = QUEST_TEMPLATES.find((t) => t.objective === "login")!;
+
+	const queueEnsureTodayQuests = (rows: unknown[]) => {
+		for (let slot = 0; slot < QUESTS_PER_DAY; slot++) {
+			mockedDb.query.mockResolvedValueOnce([{}]);
+		}
+		mockedDb.query.mockResolvedValueOnce([rows]);
+	};
+
+	it("completes the login quest outright", async () => {
+		queueEnsureTodayQuests([templateRow({ quest_code: loginTemplate.code, progress: 0, target: 1 })]);
+		mockedDb.query.mockResolvedValueOnce([{}]);
+
+		await progressForLogin(1);
+
+		expect(mockedDb.query).toHaveBeenLastCalledWith(expect.stringContaining("SET progress = target"), [1]);
+	});
+
+	it("leaves the other quests alone", async () => {
+		const playTemplate = QUEST_TEMPLATES.find((t) => t.objective === "play")!;
+		queueEnsureTodayQuests([templateRow({ quest_code: playTemplate.code, progress: 0, target: 3 })]);
+
+		await progressForLogin(1);
 
 		expect(mockedDb.query).not.toHaveBeenCalledWith(expect.stringContaining("SET progress"), expect.anything());
 	});
@@ -232,7 +244,7 @@ describe("claimQuest", () => {
 	});
 
 	it("marks the quest claimed and credits the reward in a committed transaction", async () => {
-		const connection = makeConnection([templateRow({ progress: 2, target: 2, reward_currency: 50 })]);
+		const connection = makeConnection([templateRow({ progress: 2, target: 2, reward_currency: 50, reward_xp: 0 })]);
 		mockedDb.getConnection.mockResolvedValueOnce(connection);
 		mockedGetBalance.mockResolvedValueOnce(1050);
 
@@ -242,6 +254,6 @@ describe("claimQuest", () => {
 		expect(connection.query).toHaveBeenNthCalledWith(2, expect.stringContaining("claimed_at = NOW()"), [1]);
 		expect(mockedCredit).toHaveBeenCalledWith(1, 50, "daily_quest_claim", "1", connection);
 		expect(connection.commit).toHaveBeenCalledTimes(1);
-		expect(result).toEqual({ balance: 1050, reward_currency: 50 });
+		expect(result).toEqual({ balance: 1050, reward_currency: 50, reward_xp: 0 });
 	});
 });

@@ -151,6 +151,7 @@ CREATE TABLE IF NOT EXISTS match_reports (
   mode VARCHAR(10) NOT NULL DEFAULT 'ranked',
   season INT NOT NULL,
   cards_played_by_race JSON NULL,
+  resource_cards_by_race JSON NULL,
   deck_races JSON NULL,
   cards_played JSON NULL,
   reported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -182,6 +183,7 @@ CREATE TABLE IF NOT EXISTS daily_quests (
   progress INT NOT NULL DEFAULT 0,
   target INT NOT NULL,
   reward_currency INT NOT NULL,
+  reward_xp INT NOT NULL DEFAULT 0,
   claimed_at TIMESTAMP NULL DEFAULT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -197,6 +199,11 @@ CREATE TABLE IF NOT EXISTS weekly_quests (
   progress INT NOT NULL DEFAULT 0,
   target INT NOT NULL,
   reward_pack INT NOT NULL,
+  reward_currency INT NOT NULL DEFAULT 0,
+  reward_xp INT NOT NULL DEFAULT 0,
+  -- Jours de connexion distincts déjà comptés, pour la quête « connectez-vous
+  -- 7 jours » : sans ça, deux connexions le même jour compteraient deux fois.
+  last_progress_date DATE NULL DEFAULT NULL,
   claimed_at TIMESTAMP NULL DEFAULT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -213,6 +220,13 @@ CREATE TABLE IF NOT EXISTS monthly_quests (
   target INT NOT NULL,
   reward_currency INT NOT NULL DEFAULT 0,
   reward_pack INT NOT NULL DEFAULT 0,
+  reward_xp INT NOT NULL DEFAULT 0,
+  -- Nom de race dont un pack est offert en plus de reward_pack (multirace),
+  -- ou le littéral "all" pour un pack de CHACUNE des races implémentées.
+  reward_pack_race VARCHAR(20) NULL DEFAULT NULL,
+  -- Progression par race, pour la quête « 100 cartes de chaque race » : un
+  -- compteur unique ne saurait pas distinguer 400 cartes d'une seule race.
+  meta JSON NULL,
   last_progress_date DATE NULL DEFAULT NULL,
   claimed_at TIMESTAMP NULL DEFAULT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -366,6 +380,19 @@ CREATE TABLE IF NOT EXISTS game_invites (
   FOREIGN KEY (recipient_id) REFERENCES users(id) ON DELETE CASCADE,
   INDEX idx_game_invites_recipient_status (recipient_id, status),
   INDEX idx_game_invites_sender_status (sender_id, status)
+);
+
+-- Stock de packs par race (voir docs/backend-contracts/race-packs.md côté
+-- card-game). Ne porte QUE les races réelles : le stock multirace reste
+-- users.free_packs, inchangé, pour qu'aucun pack déjà possédé n'ait à être
+-- migré. Le `free_packs` renvoyé au client est la somme des deux (voir
+-- currencyModel.getFreePacks).
+CREATE TABLE IF NOT EXISTS user_pack_stock (
+  user_id INT NOT NULL,
+  race VARCHAR(20) NOT NULL,
+  quantity INT NOT NULL DEFAULT 0,
+  PRIMARY KEY (user_id, race),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
 INSERT IGNORE INTO wishlist_stats (id, count) VALUES (1, 0);
