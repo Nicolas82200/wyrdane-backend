@@ -105,13 +105,29 @@ describe("getFreePacks", () => {
 	beforeEach(() => vi.clearAllMocks());
 
 	it("returns 0 when the user row is missing", async () => {
-		mockedDb.query.mockResolvedValueOnce([[]]);
+		// Deux requêtes depuis la refonte des packs par race : users.free_packs
+		// (stock multirace) puis user_pack_stock (stocks de race).
+		mockedDb.query.mockResolvedValueOnce([[]]).mockResolvedValueOnce([[]]);
 		expect(await getFreePacks(999)).toBe(0);
 	});
 
 	it("returns the stored free_packs count", async () => {
-		mockedDb.query.mockResolvedValueOnce([[{ free_packs: 2 }]]);
+		mockedDb.query.mockResolvedValueOnce([[{ free_packs: 2 }]]).mockResolvedValueOnce([[]]);
 		expect(await getFreePacks(1)).toBe(2);
+	});
+
+	it("sums the multirace stock and every race stock", async () => {
+		mockedDb.query
+			.mockResolvedValueOnce([[{ free_packs: 2 }]])
+			.mockResolvedValueOnce([[{ race: "Undead", quantity: 3 }, { race: "Demon", quantity: 1 }]]);
+		expect(await getFreePacks(1)).toBe(6);
+	});
+
+	it("ignores an orphan stock row for a race the game no longer knows", async () => {
+		mockedDb.query
+			.mockResolvedValueOnce([[{ free_packs: 1 }]])
+			.mockResolvedValueOnce([[{ race: "Elf", quantity: 9 }]]);
+		expect(await getFreePacks(1)).toBe(1);
 	});
 });
 

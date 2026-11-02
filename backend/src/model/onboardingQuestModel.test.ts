@@ -115,7 +115,7 @@ describe("progressForMatch", () => {
 		queueEnsureOnboardingQuests([templateRow({ quest_code: template.code, progress: 0, target: template.target })]);
 		mockedDb.query.mockResolvedValueOnce([{}]);
 
-		await progressForMatch(1, 5, "solo", true);
+		await progressForMatch(1, 5, "ranked", true);
 
 		expect(mockedDb.query).toHaveBeenLastCalledWith(expect.stringContaining("SET progress = LEAST"), [1]);
 	});
@@ -124,7 +124,7 @@ describe("progressForMatch", () => {
 		const template = ONBOARDING_QUEST_TEMPLATES.find((t) => t.objective === "win")!;
 		queueEnsureOnboardingQuests([templateRow({ quest_code: template.code, progress: 0, target: template.target })]);
 
-		await progressForMatch(1, 5, "solo", false);
+		await progressForMatch(1, 5, "ranked", false);
 
 		expect(mockedDb.query).not.toHaveBeenCalledWith(expect.stringContaining("SET progress"), expect.anything());
 	});
@@ -149,13 +149,12 @@ describe("progressForMatch", () => {
 		expect(mockedDb.query).toHaveBeenLastCalledWith(expect.stringContaining("SET progress = LEAST"), [1]);
 	});
 
-	it("does not increment 'play_network' on a solo match", async () => {
-		const template = ONBOARDING_QUEST_TEMPLATES.find((t) => t.objective === "play_network")!;
-		queueEnsureOnboardingQuests([templateRow({ quest_code: template.code, progress: 0, target: template.target })]);
+	// Décision produit 2026-11-02 : la garde est en tête de fonction, donc
+	// aucune requête n'est même émise hors multijoueur apparié.
+	it.each(["solo", "friendly"] as const)("does not touch any quest in %s mode", async (mode) => {
+		await progressForMatch(1, 5, mode, true);
 
-		await progressForMatch(1, 5, "solo", true);
-
-		expect(mockedDb.query).not.toHaveBeenCalledWith(expect.stringContaining("SET progress"), expect.anything());
+		expect(mockedDb.query).not.toHaveBeenCalled();
 	});
 
 	it("skips quests already at their target or already claimed", async () => {
@@ -165,7 +164,7 @@ describe("progressForMatch", () => {
 			templateRow({ id: 2, quest_code: template.code, progress: 0, target: template.target, claimed_at: "2026-08-24T00:00:00Z" }),
 		]);
 
-		await progressForMatch(1, 5, "solo", true);
+		await progressForMatch(1, 5, "ranked", true);
 
 		expect(mockedDb.query).not.toHaveBeenCalledWith(expect.stringContaining("SET progress"), expect.anything());
 	});

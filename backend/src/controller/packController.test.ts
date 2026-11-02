@@ -117,15 +117,27 @@ describe("buyPacksHandler", () => {
 	});
 
 	it("buys the requested quantity and returns the new balance/free_packs, without opening anything", async () => {
-		mockedBuyPacks.mockResolvedValue({ balance: 4000, free_packs: 5 });
+		const byRace = { multirace: 5 };
+		mockedBuyPacks.mockResolvedValue({ balance: 4000, free_packs: 5, free_packs_by_race: byRace });
 		const req = { user: { id: 1 }, body: { quantity: 5 } } as unknown as Request;
 		const res = mockRes();
 
 		await buyPacksHandler(req, res);
 
-		expect(mockedBuyPacks).toHaveBeenCalledWith(1, 5);
+		// `race` absent du corps = multirace, pour les builds antérieures.
+		expect(mockedBuyPacks).toHaveBeenCalledWith(1, 5, "multirace");
 		expect(res.status).toHaveBeenCalledWith(200);
-		expect(res.json).toHaveBeenCalledWith({ balance: 4000, free_packs: 5 });
+		expect(res.json).toHaveBeenCalledWith({ balance: 4000, free_packs: 5, free_packs_by_race: byRace });
+	});
+
+	it("passes the requested race through to the model", async () => {
+		mockedBuyPacks.mockResolvedValue({ balance: 0, free_packs: 1, free_packs_by_race: { Demon: 1 } });
+		const req = { user: { id: 1 }, body: { quantity: 1, race: "Demon" } } as unknown as Request;
+		const res = mockRes();
+
+		await buyPacksHandler(req, res);
+
+		expect(mockedBuyPacks).toHaveBeenCalledWith(1, 1, "Demon");
 	});
 
 	it("surfaces InsufficientFundsError as a 400 with the pack cost", async () => {

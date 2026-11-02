@@ -82,31 +82,109 @@ const debit = async (
 // weeklyQuestModel/referralModel), distinct de soft_currency. Pas de ledger
 // dédié comme currency_ledger : une seule source de valeur pour l'instant,
 // pas besoin d'audit fin.
-const getFreePacks = async (userId: number): Promise<number> => {
-	const [rows] = await db.query<(RowDataPacket & { free_packs: number })[]>(
+// Catégories de stock de packs, dans l'ordre de CurrencyManager.PACK_RACES
+// côté client (voir docs/backend-contracts/race-packs.md). MULTIRACE_PACK est
+// stocké à part, sur users.free_packs (voir getFreePacksByRace).
+const MULTIRACE_PACK = "multirace";
+const PACK_RACES = ["Undead", "Human", MULTIRACE_PACK, "Demon", "Abomination"] as const;
+type PackRace = (typeof PACK_RACES)[number];
+
+const isPackRace = (value: unknown): value is PackRace =>
+	typeof value === "string" && (PACK_RACES as readonly string[]).includes(value);
+
+class UnknownPackRaceError extends Error {
+	constructor() {
+		super("Catégorie de pack inconnue");
+		this.name = "UnknownPackRaceError";
+	}
+}
+
+// ponytail: le multirace vit sur users.free_packs et les races sur
+// user_pack_stock, pour n'avoir aucun pack déjà possédé à migrer en prod ;
+// à unifier dans user_pack_stock si une migration de données devient
+// acceptable.
+const getFreePacksByRace = async (userId: number): Promise<Record<PackRace, number>> => {
+	const [userRows] = await db.query<(RowDataPacket & { free_packs: number })[]>(
 		"SELECT free_packs FROM users WHERE id = ?",
 		[userId],
 	);
-	return rows[0]?.free_packs ?? 0;
+	const [stockRows] = await db.query<(RowDataPacket & { race: string; quantity: number })[]>(
+		"SELECT race, quantity FROM user_pack_stock WHERE user_id = ?",
+		[userId],
+	);
+
+	const byRace = Object.fromEntries(PACK_RACES.map((race) => [race, 0])) as Record<PackRace, number>;
+	byRace[MULTIRACE_PACK] = userRows[0]?.free_packs ?? 0;
+	for (const row of stockRows) {
+		// Une race retirée du jeu laisserait une ligne orpheline : ignorée
+		// plutôt que renvoyée au client sous une clé qu'il ne connaît pas.
+		if (!isPackRace(row.race) || row.race === MULTIRACE_PACK) continue;
+		byRace[row.race] = row.quantity;
+	}
+	return byRace;
 };
 
-const creditFreePacks = async (userId: number, amount: number, connection?: PoolConnection): Promise<void> => {
+// Somme de toutes les catégories : c'est ce que lisent la pastille du menu
+// principal et tout le client qui n'a pas besoin du détail par race.
+const getFreePacks = async (userId: number): Promise<number> => {
+	const byRace = await getFreePacksByRace(userId);
+	return Object.values(byRace).reduce((sum, quantity) => sum + quantity, 0);
+};
+
+// `race` omis = multirace : toutes les sources historiques de packs (quêtes,
+// niveaux, parrainage, tutoriel) créditent donc du multirace sans changement.
+const creditFreePacks = async (
+	userId: number,
+	amount: number,
+	connection?: PoolConnection,
+	race: string = MULTIRACE_PACK,
+): Promise<void> => {
+	if (!isPackRace(race)) throw new UnknownPackRaceError();
 	const runner: Pool | PoolConnection = connection ?? db;
-	await runner.query("UPDATE users SET free_packs = free_packs + ? WHERE id = ?", [amount, userId]);
+	if (race === MULTIRACE_PACK) {
+		await runner.query("UPDATE users SET free_packs = free_packs + ? WHERE id = ?", [amount, userId]);
+		return;
+	}
+	await runner.query(
+		`INSERT INTO user_pack_stock (user_id, race, quantity) VALUES (?, ?, ?)
+		 ON DUPLICATE KEY UPDATE quantity = quantity + VALUES(quantity)`,
+		[userId, race, amount],
+	);
 };
 
 // Débite un seul pack gratuit (verrouille la ligne si appelé dans une
 // transaction fournie, même garde-fou anti-double-clic que debit()).
-const debitFreePack = async (userId: number, connection?: PoolConnection): Promise<void> => {
+// Ne retombe JAMAIS sur une autre catégorie quand celle demandée est vide
+// (contrat race-packs.md) : un stock vide est un refus, pas un repli.
+const debitFreePack = async (
+	userId: number,
+	connection?: PoolConnection,
+	race: string = MULTIRACE_PACK,
+): Promise<void> => {
+	if (!isPackRace(race)) throw new UnknownPackRaceError();
 	const runner: Pool | PoolConnection = connection ?? db;
-	const [rows] = await runner.query<(RowDataPacket & { free_packs: number })[]>(
-		connection ? "SELECT free_packs FROM users WHERE id = ? FOR UPDATE" : "SELECT free_packs FROM users WHERE id = ?",
-		[userId],
-	);
-	const freePacks = rows[0]?.free_packs ?? 0;
-	if (freePacks < 1) throw new InsufficientFreePacksError();
 
-	await runner.query("UPDATE users SET free_packs = free_packs - 1 WHERE id = ?", [userId]);
+	if (race === MULTIRACE_PACK) {
+		const [rows] = await runner.query<(RowDataPacket & { free_packs: number })[]>(
+			connection ? "SELECT free_packs FROM users WHERE id = ? FOR UPDATE" : "SELECT free_packs FROM users WHERE id = ?",
+			[userId],
+		);
+		if ((rows[0]?.free_packs ?? 0) < 1) throw new InsufficientFreePacksError();
+		await runner.query("UPDATE users SET free_packs = free_packs - 1 WHERE id = ?", [userId]);
+		return;
+	}
+
+	const [rows] = await runner.query<(RowDataPacket & { quantity: number })[]>(
+		connection
+			? "SELECT quantity FROM user_pack_stock WHERE user_id = ? AND race = ? FOR UPDATE"
+			: "SELECT quantity FROM user_pack_stock WHERE user_id = ? AND race = ?",
+		[userId, race],
+	);
+	if ((rows[0]?.quantity ?? 0) < 1) throw new InsufficientFreePacksError();
+	await runner.query(
+		"UPDATE user_pack_stock SET quantity = quantity - 1 WHERE user_id = ? AND race = ?",
+		[userId, race],
+	);
 };
 
 // Montant total crédité/débité à un joueur pour une référence donnée (ex. un
@@ -209,12 +287,17 @@ const claimFirstLoginReward = async (
 export {
 	InsufficientFundsError,
 	InsufficientFreePacksError,
+	UnknownPackRaceError,
 	STARTER_CURRENCY,
 	FIRST_LOGIN_REWARD,
+	MULTIRACE_PACK,
+	PACK_RACES,
+	isPackRace,
 	getBalance,
 	credit,
 	debit,
 	getFreePacks,
+	getFreePacksByRace,
 	creditFreePacks,
 	debitFreePack,
 	getCreditedAmountForReference,

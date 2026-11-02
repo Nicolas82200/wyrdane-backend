@@ -14,6 +14,7 @@ import {
 	recordCardPlays,
 } from "../model/rankedModel";
 import type { MatchMode } from "../model/rankedModel";
+import type { QuestMatchMode } from "../model/questMatchMode";
 import { sanitizeCardsPlayedByRace, sanitizeDeckRaces, sanitizeCardsPlayed, sanitizeDurationSec } from "../helper/matchPayload";
 import { verifyMatchSessionToken } from "../helper/matchSessionToken";
 import { progressForMatch } from "../model/questModel";
@@ -38,6 +39,10 @@ const reportMatch = async (req: Request, res: Response): Promise<void> => {
 			opponentId?: number;
 			winnerId?: number;
 			cardsPlayedByRace?: Record<string, number>;
+			// Cartes-RESSOURCE jouées par race, comptées à part : une quête
+			// « jouez 10 Sceaux » ne doit pas être validée par des serviteurs
+			// Humains, ni l'inverse.
+			resourceCardsByRace?: Record<string, number>;
 			deckRaces?: string[];
 			cardsPlayed?: string[];
 			matchSessionToken?: string;
@@ -88,8 +93,17 @@ const reportMatch = async (req: Request, res: Response): Promise<void> => {
 		// mais au moins un payload absurde (compteur à 999999, race inexistante)
 		// ne peut plus fausser plusieurs quêtes/plusieurs races d'un coup.
 		const cardsPlayedByRace = sanitizeCardsPlayedByRace(rawBody.cardsPlayedByRace);
+		const resourceCardsByRace = sanitizeCardsPlayedByRace(rawBody.resourceCardsByRace);
 		const deckRaces = sanitizeDeckRaces(rawBody.deckRaces);
 		const cardsPlayed = sanitizeCardsPlayed(rawBody.cardsPlayed);
+
+		// Mode vu par les QUÊTES, distinct du `mode` du MMR ci-dessus : une
+		// partie sur invitation d'ami n'a jamais été appariée par la file, donc
+		// n'a aucun jeton de session valide — et ne doit pas faire progresser
+		// les quêtes de parties (un ami complice rendrait les victoires
+		// gratuites). Conséquence assumée : tant qu'une build antérieure au
+		// jeton de session circule, ses parties Normal comptent comme amicales.
+		const questMode: QuestMatchMode = sessionValid ? mode : "friendly";
 
 		const existingMatch = await findMatchHistory(clientMatchId);
 		if (existingMatch) {
@@ -117,7 +131,7 @@ const reportMatch = async (req: Request, res: Response): Promise<void> => {
 			return;
 		}
 
-		await createReport(clientMatchId, userId, opponentId, winnerId, cardsPlayedByRace ?? null, deckRaces ?? null, cardsPlayed ?? null, mode);
+		await createReport(clientMatchId, userId, opponentId, winnerId, cardsPlayedByRace ?? null, deckRaces ?? null, cardsPlayed ?? null, mode, resourceCardsByRace ?? null);
 
 		const opponentReport = await findReport(clientMatchId, opponentId);
 		if (!opponentReport) {
@@ -149,23 +163,23 @@ const reportMatch = async (req: Request, res: Response): Promise<void> => {
 		// l'adversaire, qui ne connaît pas son deck).
 		await recordCardPlays(clientMatchId, userId, cardsPlayed, winnerId === userId);
 		await recordCardPlays(clientMatchId, opponentId, opponentReport.cards_played ?? undefined, winnerId === opponentId);
-		await progressForMatch(userId, "ranked", winnerId === userId, { cardsPlayedByRace, deckRaces });
-		await progressForMatch(opponentId, "ranked", winnerId === opponentId, {
+		// L'adversaire n'a pas déclaré ses cartes-ressource dans un rapport
+		// antérieur à ce champ : sa quête-ressource du jour ne progressera
+		// simplement pas sur ce match, plutôt que de compter ses serviteurs.
+		const ownRaceData = { cardsPlayedByRace, resourceCardsByRace, deckRaces };
+		const opponentRaceData = {
 			cardsPlayedByRace: opponentReport.cards_played_by_race ?? undefined,
+			resourceCardsByRace: opponentReport.resource_cards_by_race ?? undefined,
 			deckRaces: opponentReport.deck_races ?? undefined,
-		});
-		await progressWeeklyForMatch(userId, "ranked", winnerId === userId, { cardsPlayedByRace, deckRaces });
-		await progressWeeklyForMatch(opponentId, "ranked", winnerId === opponentId, {
-			cardsPlayedByRace: opponentReport.cards_played_by_race ?? undefined,
-			deckRaces: opponentReport.deck_races ?? undefined,
-		});
-		await progressMonthlyForMatch(userId, "ranked", winnerId === userId, { cardsPlayedByRace, deckRaces });
-		await progressMonthlyForMatch(opponentId, "ranked", winnerId === opponentId, {
-			cardsPlayedByRace: opponentReport.cards_played_by_race ?? undefined,
-			deckRaces: opponentReport.deck_races ?? undefined,
-		});
-		await progressUniqueForMatch(userId, "ranked", winnerId === userId, { deckRaces });
-		await progressUniqueForMatch(opponentId, "ranked", winnerId === opponentId, {
+		};
+		await progressForMatch(userId, questMode, winnerId === userId, ownRaceData);
+		await progressForMatch(opponentId, questMode, winnerId === opponentId, opponentRaceData);
+		await progressWeeklyForMatch(userId, questMode, winnerId === userId, ownRaceData);
+		await progressWeeklyForMatch(opponentId, questMode, winnerId === opponentId, opponentRaceData);
+		await progressMonthlyForMatch(userId, questMode, winnerId === userId, ownRaceData);
+		await progressMonthlyForMatch(opponentId, questMode, winnerId === opponentId, opponentRaceData);
+		await progressUniqueForMatch(userId, questMode, winnerId === userId, { deckRaces });
+		await progressUniqueForMatch(opponentId, questMode, winnerId === opponentId, {
 			deckRaces: opponentReport.deck_races ?? undefined,
 		});
 		// ratingA/ratingB = MMR post-match de userId/opponentId respectivement
@@ -179,9 +193,9 @@ const reportMatch = async (req: Request, res: Response): Promise<void> => {
 		}
 		// `level` = niveau post-match de userId, déjà destructuré ci-dessus ;
 		// celui de l'adversaire n'est lu qu'ici, sans intérêt pour la réponse.
-		await progressOnboardingForMatch(userId, level, "ranked", winnerId === userId);
+		await progressOnboardingForMatch(userId, level, questMode, winnerId === userId);
 		const { level: opponentLevel } = await getLevel(opponentId);
-		await progressOnboardingForMatch(opponentId, opponentLevel, "ranked", winnerId === opponentId);
+		await progressOnboardingForMatch(opponentId, opponentLevel, questMode, winnerId === opponentId);
 		res.status(200).json({ status: "confirmed", xpGained, level, xp, xpToNext, rewards });
 	} catch (error) {
 		console.error(error);

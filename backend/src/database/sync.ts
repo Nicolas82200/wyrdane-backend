@@ -68,6 +68,39 @@ const ensureSoloStatsColumns = async (connection: mysql.Connection): Promise<voi
 	}
 };
 
+// Colonnes de récompense ajoutées aux trois tables de quêtes périodiques par
+// la refonte du 2026-11-02 (XP, or sur l'hebdo, pack de race, progression par
+// race) — même pattern que ensureSoloStatsColumns, et c'est
+// ce qui rend un `db:sync` obligatoire en prod après ce déploiement.
+const QUEST_TABLE_COLUMNS_TO_ENSURE: Record<string, { name: string; ddl: string }[]> = {
+	daily_quests: [{ name: "reward_xp", ddl: "reward_xp INT NOT NULL DEFAULT 0" }],
+	weekly_quests: [
+		{ name: "reward_currency", ddl: "reward_currency INT NOT NULL DEFAULT 0" },
+		{ name: "reward_xp", ddl: "reward_xp INT NOT NULL DEFAULT 0" },
+		{ name: "last_progress_date", ddl: "last_progress_date DATE NULL DEFAULT NULL" },
+	],
+	monthly_quests: [
+		{ name: "reward_xp", ddl: "reward_xp INT NOT NULL DEFAULT 0" },
+		{ name: "reward_pack_race", ddl: "reward_pack_race VARCHAR(20) NULL DEFAULT NULL" },
+		{ name: "meta", ddl: "meta JSON NULL" },
+	],
+};
+
+const ensureQuestTableColumns = async (connection: mysql.Connection): Promise<void> => {
+	for (const [table, columns] of Object.entries(QUEST_TABLE_COLUMNS_TO_ENSURE)) {
+		const [rows] = await connection.query<mysql.RowDataPacket[]>(
+			"SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?",
+			[DB_NAME, table],
+		);
+		const existing = new Set(rows.map((row) => row.COLUMN_NAME as string));
+		for (const column of columns) {
+			if (existing.has(column.name)) continue;
+			console.log(`→ Ajout de la colonne ${table}.${column.name}...`);
+			await connection.query(`ALTER TABLE ${table} ADD COLUMN ${column.ddl}`);
+		}
+	}
+};
+
 // win_streak ajoutée à ranked_stats après sa création initiale (voir
 // schema.sql) — même pattern que ensureSoloStatsColumns.
 const RANKED_STATS_COLUMNS_TO_ENSURE: { name: string; ddl: string }[] = [
@@ -125,6 +158,7 @@ const dropUsernameUniqueIndex = async (connection: mysql.Connection): Promise<vo
 // initiale (voir schema.sql) — même pattern que ensureSoloStatsColumns.
 const MATCH_REPORTS_COLUMNS_TO_ENSURE: { name: string; ddl: string }[] = [
 	{ name: "cards_played_by_race", ddl: "cards_played_by_race JSON NULL" },
+	{ name: "resource_cards_by_race", ddl: "resource_cards_by_race JSON NULL" },
 	{ name: "deck_races", ddl: "deck_races JSON NULL" },
 	{ name: "cards_played", ddl: "cards_played JSON NULL" },
 	{ name: "mode", ddl: "mode VARCHAR(10) NOT NULL DEFAULT 'ranked'" },
@@ -227,6 +261,7 @@ const main = async (): Promise<void> => {
 		await ensureMatchReportsColumns(connection);
 		await ensureMatchHistoryColumns(connection);
 		await ensureMatchmakingTicketsColumns(connection);
+		await ensureQuestTableColumns(connection);
 		console.log("✓ Schéma à jour, aucune donnée existante affectée.");
 	} finally {
 		await connection.end();

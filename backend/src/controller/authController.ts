@@ -11,6 +11,8 @@ import {
 import { grantAllCards } from "../model/collectionModel";
 import { recordLogin } from "../model/analyticsModel";
 import { progressForLogin } from "../model/monthlyQuestModel";
+import { progressForLogin as progressDailyForLogin } from "../model/questModel";
+import { progressForLogin as progressWeeklyForLogin } from "../model/weeklyQuestModel";
 import { encodeJWT } from "../helper/jwtHelper";
 
 // Retrouve (ou crée) le joueur associé à un steamid et pose le cookie de
@@ -42,8 +44,18 @@ const loginWithSteamId = async (
 	Promise.resolve(ensureAdminFromEnv(user.id, steamId)).catch((error) =>
 		console.error("ensureAdminFromEnv failed", error),
 	);
+	// Les trois familles périodiques ont chacune une quête de connexion depuis
+	// la refonte du 2026-11-02 (la quotidienne remplace l'ancienne popup de
+	// récompense de connexion). Fire-and-forget comme recordLogin juste
+	// au-dessus : un échec ne doit jamais faire rater l'authentification.
 	Promise.resolve(progressForLogin(user.id)).catch((error) =>
 		console.error("progressForLogin failed", error),
+	);
+	Promise.resolve(progressDailyForLogin(user.id)).catch((error) =>
+		console.error("progressDailyForLogin failed", error),
+	);
+	Promise.resolve(progressWeeklyForLogin(user.id)).catch((error) =>
+		console.error("progressWeeklyForLogin failed", error),
 	);
 
 	// Pseudo réel affiché plutôt que le nom générique posé à la création

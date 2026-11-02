@@ -268,7 +268,7 @@ describe("reportMatch", () => {
 
 		await reportMatch(req, res);
 
-		expect(mocked.createReport).toHaveBeenCalledWith("m1", 1, 2, 1, null, null, null, "ranked");
+		expect(mocked.createReport).toHaveBeenCalledWith("m1", 1, 2, 1, null, null, null, "ranked", null);
 		expect(res.status).toHaveBeenCalledWith(202);
 		expect(mocked.confirmMatch).not.toHaveBeenCalled();
 	});
@@ -317,7 +317,12 @@ describe("reportMatch", () => {
 			ratingB: 984,
 		});
 		mocked.getLevel.mockResolvedValue({ level: 7, xp: 0, xpToNext: 135 });
-		const req = reqAs(1, { clientMatchId: "m1", opponentId: 2, winnerId: 1 });
+		const req = reqAs(1, {
+			clientMatchId: "m1",
+			opponentId: 2,
+			winnerId: 1,
+			matchSessionToken: issueMatchSessionToken("m1", 1, 2),
+		});
 		const res = mockRes();
 
 		await reportMatch(req, res);
@@ -361,19 +366,48 @@ describe("reportMatch", () => {
 			ratingA: 1016,
 			ratingB: 984,
 		});
-		const req = reqAs(1, { clientMatchId: "m1", opponentId: 2, winnerId: 1 });
+		// Jeton valide = match réellement apparié par la file, donc les quêtes
+		// de parties progressent (voir questMatchMode).
+		const req = reqAs(1, {
+			clientMatchId: "m1",
+			opponentId: 2,
+			winnerId: 1,
+			matchSessionToken: issueMatchSessionToken("m1", 1, 2),
+		});
 		const res = mockRes();
 
 		await reportMatch(req, res);
 
 		expect(mocked.progressForMatch).toHaveBeenCalledWith(1, "ranked", true, {
 			cardsPlayedByRace: undefined,
+			resourceCardsByRace: undefined,
 			deckRaces: undefined,
 		});
 		expect(mocked.progressForMatch).toHaveBeenCalledWith(2, "ranked", false, {
 			cardsPlayedByRace: undefined,
+			resourceCardsByRace: undefined,
 			deckRaces: undefined,
 		});
+	});
+
+	// Constat corrigé le 2026-11-02 : sans jeton de session, le match n'a pas
+	// été apparié par la file — c'est une invitation d'ami, qui ne fait
+	// progresser aucune quête de partie.
+	it("treats a match reported without a session token as a friendly", async () => {
+		mocked.findMatchHistory.mockResolvedValue(null);
+		mocked.findReport
+			.mockResolvedValueOnce(null)
+			.mockResolvedValueOnce({ opponent_id: 1, winner_id: 1, mode: "ranked" });
+		mocked.confirmMatch.mockResolvedValue({
+			xpGained: 50, level: 1, xp: 50, xpToNext: 100, rewards: [], ratingA: 1016, ratingB: 984,
+		});
+		const req = reqAs(1, { clientMatchId: "m1", opponentId: 2, winnerId: 1 });
+		const res = mockRes();
+
+		await reportMatch(req, res);
+
+		expect(mocked.progressForMatch).toHaveBeenCalledWith(1, "friendly", true, expect.anything());
+		expect(mocked.progressForMatch).toHaveBeenCalledWith(2, "friendly", false, expect.anything());
 	});
 
 	it("progresses quests for both players using each player's own declared race data", async () => {
@@ -383,6 +417,7 @@ describe("reportMatch", () => {
 			winner_id: 1,
 			mode: "ranked",
 			cards_played_by_race: { Demon: 3 },
+			resource_cards_by_race: { Demon: 9 },
 			deck_races: ["Demon"],
 		});
 		mocked.confirmMatch.mockResolvedValue({
@@ -399,7 +434,9 @@ describe("reportMatch", () => {
 			opponentId: 2,
 			winnerId: 1,
 			cardsPlayedByRace: { Undead: 4 },
+			resourceCardsByRace: { Undead: 7 },
 			deckRaces: ["Undead"],
+			matchSessionToken: issueMatchSessionToken("m1", 1, 2),
 		});
 		const res = mockRes();
 
@@ -407,10 +444,12 @@ describe("reportMatch", () => {
 
 		expect(mocked.progressForMatch).toHaveBeenCalledWith(1, "ranked", true, {
 			cardsPlayedByRace: { Undead: 4 },
+			resourceCardsByRace: { Undead: 7 },
 			deckRaces: ["Undead"],
 		});
 		expect(mocked.progressForMatch).toHaveBeenCalledWith(2, "ranked", false, {
 			cardsPlayedByRace: { Demon: 3 },
+			resourceCardsByRace: { Demon: 9 },
 			deckRaces: ["Demon"],
 		});
 	});
