@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { RARITY_WEIGHTS, MAX_DUPLICATE_WEIGHT_REDUCTION, duplicateWeightFactor, pickWeighted } from "./packModel";
+import { readFileSync } from "node:fs";
+import { RARITY_WEIGHTS, MAX_DUPLICATE_WEIGHT_REDUCTION, duplicateWeightFactor, pickWeighted, cardsRaceFor } from "./packModel";
+import { PACK_RACES, MULTIRACE_PACK } from "./currencyModel";
 import type { Cards } from "../types";
 import type { RowDataPacket } from "mysql2";
 
@@ -146,5 +148,23 @@ describe("pickWeighted duplicate protection", () => {
 		}
 		expect(second / 4000).toBeGreaterThan(0.45);
 		expect(second / 4000).toBeLessThan(0.55);
+	});
+});
+
+describe("cardsRaceFor", () => {
+	// Garde-fou du bug des packs de race : chaque cle de stock doit designer
+	// une valeur reellement presente dans cards.race, sinon le pool est vide
+	// et l'ouverture echoue en 500.
+	const sql = readFileSync(new URL("../database/cards_data.sql", import.meta.url), "utf-8");
+	const racesInDb = new Set(
+		[...sql.matchAll(/VALUES \('(?:[^']|'')*', '([^']*)'/g)].map((m) => m[1]),
+	);
+
+	it("maps every pack race to a race that exists in cards_data.sql", () => {
+		expect(racesInDb.size).toBeGreaterThan(0);
+		for (const race of PACK_RACES) {
+			if (race === MULTIRACE_PACK) continue;
+			expect(racesInDb).toContain(cardsRaceFor(race));
+		}
 	});
 });

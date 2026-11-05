@@ -59,6 +59,24 @@ const MAX_DUPLICATE_WEIGHT_REDUCTION = 0.9;
 export const duplicateWeightFactor = (completion: number): number =>
 	1 - MAX_DUPLICATE_WEIGHT_REDUCTION * Math.min(Math.max(completion, 0), 1);
 
+// Les clés de stock de packs sont en anglais (CurrencyManager.PACK_RACES côté
+// card-game, PACK_RACES côté currencyModel) alors que cards.race est stockée
+// en français (voir cards_data.sql) : 'Undead'/'Human' n'existent tout
+// simplement pas en base, donc un pack de ces races tirait dans un pool vide
+// et l'ouverture échouait en 500 ("Aucune carte disponible pour un pack"),
+// que le client affiche en "Solde insuffisant ou erreur réseau". Les deux
+// autres races s'écrivent pareil dans les deux langues, d'où un bug qui ne
+// touchait que la moitié des packs.
+const CARDS_RACE_BY_PACK_RACE: Record<string, string> = {
+	Undead: "Mort-Vivant",
+	Human: "Humain",
+	Demon: "Demon",
+	Abomination: "Abomination",
+};
+
+export const cardsRaceFor = (packRace: string): string =>
+	CARDS_RACE_BY_PACK_RACE[packRace] ?? packRace;
+
 interface DrawableCardRow extends Cards, RowDataPacket {}
 
 // Carte tirée telle que renvoyée au client : dusted/goldEarned informent
@@ -83,7 +101,7 @@ const fetchDrawablePool = async (race: string = MULTIRACE_PACK): Promise<Drawabl
 	}
 	const [rows] = await db.query<DrawableCardRow[]>(
 		"SELECT * FROM cards WHERE card_type != 'Ressource' AND race = ?",
-		[race],
+		[cardsRaceFor(race)],
 	);
 	return rows;
 };
