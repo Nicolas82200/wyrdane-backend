@@ -69,8 +69,36 @@ notify_failure() {
 			-d "$payload" \
 			"$DISCORD_CRASH_WEBHOOK_URL" >/dev/null || true
 	fi
+	ping_healthcheck fail
 }
+
+# « Dead man's switch » : l'alerte Discord ci-dessus ne part que si ce script
+# TOURNE et echoue. Si le VPS est mort (panne, attaque, disque plein), rien ne
+# tourne, donc rien n'alerte : le silence devient indiscernable de « tout va
+# bien ». Pire, un attaquant qui efface la machine efface aussi le mecanisme
+# qui aurait pu prevenir. Un surveillant installe ICI mourrait avec la machine :
+# il doit etre a l'exterieur.
+#
+# D'ou ce ping SORTANT vers un service tiers (healthchecks.io ou equivalent),
+# qui raisonne a l'envers : c'est l'ABSENCE de ping avant une echeance qui
+# declenche son alerte. Un seul mecanisme couvre donc les deux pannes :
+# sauvegarde cassee en silence, ET machine disparue.
+#
+# Conventions du service : l'URL nue = succes, /fail = echec signale tout de
+# suite (plutot que d'attendre l'echeance), /start = debut d'execution.
+# No-op silencieux si HEALTHCHECK_URL n'est pas renseignee dans .env, meme
+# contrat que DISCORD_CRASH_WEBHOOK_URL. Jamais fatal : un service de
+# surveillance injoignable ne doit pas faire echouer une sauvegarde valide.
+ping_healthcheck() {
+	[ -n "${HEALTHCHECK_URL:-}" ] || return 0
+	local suffix="${1:-}"
+	curl -fsS -m 10 --retry 2 -o /dev/null \
+		"${HEALTHCHECK_URL%/}${suffix:+/$suffix}" || true
+}
+
 trap 'notify_failure "erreur inattendue ligne $LINENO (voir les logs cron)"' ERR
+
+ping_healthcheck start
 
 for var in DB_NAME DB_USER DB_PASSWORD; do
 	[ -n "${!var:-}" ] || { notify_failure "variable $var absente de .env"; exit 1; }
@@ -110,14 +138,28 @@ find "$BACKUP_DIR/daily" -name 'wyrdane_*.sql.gz' -type f 2>/dev/null \
 find "$BACKUP_DIR/weekly" -name 'wyrdane_*.sql.gz' -type f 2>/dev/null \
 	| sort -r | tail -n "+$((RETENTION_WEEKLY + 1))" | xargs -r rm -f
 
-# Copie hors du VPS : indispensable, une sauvegarde qui vit sur la machine
-# qu'elle protège ne couvre pas la perte de cette machine. Renseigner
-# BACKUP_REMOTE dans .env (destination rsync/ssh, ex. "user@host:/backups/wyrdane").
-# Non fatal : mieux vaut une sauvegarde locale seule qu'aucune, mais on alerte.
+# Copie hors du VPS. Deux facons de l'obtenir, et le choix a des consequences :
+#
+#   - POUSSER d'ici (renseigner BACKUP_REMOTE, destination rsync/ssh) : la copie
+#     est garantie a chaque nuit, mais toute destination intermittente — un PC
+#     de bureau, typiquement — fait echouer la copie et declenche une alerte
+#     Discord CHAQUE nuit ou la machine est eteinte. On finit par ignorer ces
+#     alertes, et le jour ou c'en est une vraie on la rate. A reserver a une
+#     destination joignable en permanence (espace de stockage dedie).
+#   - TIRER depuis l'autre machine (laisser BACKUP_REMOTE vide) : le VPS ne
+#     tente rien, donc n'alerte sur rien. La copie n'est fraiche que quand la
+#     machine distante tourne — compromis assume, retenu le 2026-11-12 pour la
+#     beta (voir docs/beta-launch-runbook.md cote card-game).
+#
+# Non fatal dans les deux cas : mieux vaut une sauvegarde locale seule
+# qu'aucune, mais on alerte.
 if [ -n "${BACKUP_REMOTE:-}" ]; then
 	rsync -az --timeout=120 "$TARGET" "$BACKUP_REMOTE/" \
 		|| notify_failure "copie hors site vers $BACKUP_REMOTE impossible (le dump local, lui, est bien ecrit)"
 fi
+
+# Succes : c'est CE ping qui, par son absence, declencherait l'alerte externe.
+ping_healthcheck
 
 trap - ERR
 echo "[backup-db] OK : $TARGET ($(du -h "$TARGET" | cut -f1))"
