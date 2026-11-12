@@ -55,7 +55,16 @@ notify_failure() {
 		ascii_safe="$(printf '%s' "$safe" | iconv -f UTF-8 -t ASCII//TRANSLIT 2>/dev/null || true)"
 		[ -n "$ascii_safe" ] && safe="$ascii_safe"
 		local payload
-		payload="{\"content\":\":rotating_light: **Sauvegarde BDD Wyrdane en echec** - $safe\"}"
+		# thread_name est OBLIGATOIRE : le salon derriere ce webhook est un salon
+		# de FORUM, et Discord refuse alors tout post qui n'en fournit pas, avec
+		# un 400 et le code 220001 ("Webhooks posted to forum channels must have
+		# a thread_name or thread_id"). Constate le 2026-11-12 : l'alerte etait
+		# donc silencieusement perdue depuis toujours, exactement au moment ou
+		# elle compte, et une sauvegarde en echec ne prevenait personne. Le
+		# helper TypeScript (src/helper/discordHelper.ts) gere deja ce cas pour
+		# les rapports de plantage ; ce script bash etait le seul oublie.
+		# Toujours sur a fournir : un salon textuel classique ignore le champ.
+		payload="{\"thread_name\":\"Sauvegarde BDD en echec\",\"content\":\":rotating_light: **Sauvegarde BDD Wyrdane en echec** - $safe\"}"
 		curl -fsS -m 15 -X POST -H 'Content-Type: application/json' \
 			-d "$payload" \
 			"$DISCORD_CRASH_WEBHOOK_URL" >/dev/null || true
