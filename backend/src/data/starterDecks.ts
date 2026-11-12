@@ -63,7 +63,7 @@ export const STARTER_DECKS: StarterDeck[] = [
 			{ name: "Capitaine de Milice Eorthalienne", quantity: 2 },
 			{ name: "Champion du Peuple Eorthalien", quantity: 2 },
 			{ name: "Chevalier Skeldarien du Mur", quantity: 2 },
-			{ name: "Sceau du Royaume", quantity: 15 },
+			{ name: "Sceau", quantity: 15 },
 		],
 	},
 	{
@@ -109,7 +109,7 @@ export const STARTER_DECKS: StarterDeck[] = [
 			{ name: "Second Regard", quantity: 2 },
 			{ name: "Masse-Qui-Ne-Cesse", quantity: 2 },
 			{ name: "Ce-Qui-A-Trop-Poussé", quantity: 2 },
-			{ name: "Éclat d'Anomalie", quantity: 15 },
+			{ name: "Anomalie", quantity: 15 },
 		],
 	},
 ];
