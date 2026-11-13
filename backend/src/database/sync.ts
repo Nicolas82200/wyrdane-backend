@@ -68,11 +68,19 @@ const ensureSoloStatsColumns = async (connection: mysql.Connection): Promise<voi
 	}
 };
 
-// Colonnes de récompense ajoutées aux trois tables de quêtes périodiques par
-// la refonte du 2026-11-02 (XP, or sur l'hebdo, pack de race, progression par
-// race) — même pattern que ensureSoloStatsColumns, et c'est
-// ce qui rend un `db:sync` obligatoire en prod après ce déploiement.
-const QUEST_TABLE_COLUMNS_TO_ENSURE: Record<string, { name: string; ddl: string }[]> = {
+// Colonnes à ajouter sur des tables déjà créées, indexées par nom de table.
+// Point d'entrée à préférer pour tout nouvel ajout de colonne : les six
+// `ensure<Table>Columns` ci-dessus et ci-dessous sont la même boucle recopiée
+// par table, écrite avant que ce tableau générique existe. Ne pas en ajouter
+// une septième — déclarer la table ici.
+//
+// Contenu actuel : les colonnes de récompense des trois tables de quêtes
+// périodiques (refonte du 2026-11-02 — XP, or sur l'hebdo, pack de race,
+// progression par race) et celles du ledger d'achats (2026-11-13 — montant et
+// devise réellement facturés, horodatage de la dernière interrogation de
+// QueryTxn). C'est ce qui rend un `db:sync` obligatoire en prod après ces
+// déploiements.
+const TABLE_COLUMNS_TO_ENSURE: Record<string, { name: string; ddl: string }[]> = {
 	daily_quests: [{ name: "reward_xp", ddl: "reward_xp INT NOT NULL DEFAULT 0" }],
 	weekly_quests: [
 		{ name: "reward_currency", ddl: "reward_currency INT NOT NULL DEFAULT 0" },
@@ -84,10 +92,15 @@ const QUEST_TABLE_COLUMNS_TO_ENSURE: Record<string, { name: string; ddl: string 
 		{ name: "reward_pack_race", ddl: "reward_pack_race VARCHAR(20) NULL DEFAULT NULL" },
 		{ name: "meta", ddl: "meta JSON NULL" },
 	],
+	purchase_ledger: [
+		{ name: "amount", ddl: "amount INT" },
+		{ name: "currency", ddl: "currency CHAR(3)" },
+		{ name: "last_checked_at", ddl: "last_checked_at TIMESTAMP NULL DEFAULT NULL" },
+	],
 };
 
-const ensureQuestTableColumns = async (connection: mysql.Connection): Promise<void> => {
-	for (const [table, columns] of Object.entries(QUEST_TABLE_COLUMNS_TO_ENSURE)) {
+const ensureTableColumns = async (connection: mysql.Connection): Promise<void> => {
+	for (const [table, columns] of Object.entries(TABLE_COLUMNS_TO_ENSURE)) {
 		const [rows] = await connection.query<mysql.RowDataPacket[]>(
 			"SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?",
 			[DB_NAME, table],
@@ -136,6 +149,25 @@ const ensureRankedStatsIndex = async (connection: mysql.Connection): Promise<voi
 	if (rows.length > 0) return;
 	console.log("→ Ajout de l'index ranked_stats(season, mmr)...");
 	await connection.query("CREATE INDEX idx_ranked_stats_season_mmr ON ranked_stats (season, mmr)");
+};
+
+// Index balayé à chaque tour du réconciliateur d'achats (voir
+// helper/shopReconciler.ts) : il cherche les commandes par statut et
+// ancienneté de dernière vérification. `CREATE TABLE IF NOT EXISTS` ne
+// l'ajoute pas sur une table déjà créée, d'où cette vérification — même
+// pattern que ensureRankedStatsIndex.
+const ensurePurchaseLedgerIndex = async (connection: mysql.Connection): Promise<void> => {
+	const [rows] = await connection.query<mysql.RowDataPacket[]>(
+		`SELECT INDEX_NAME FROM information_schema.STATISTICS
+		 WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'purchase_ledger'
+		   AND INDEX_NAME = 'idx_purchase_ledger_status_checked'`,
+		[DB_NAME],
+	);
+	if (rows.length > 0) return;
+	console.log("→ Ajout de l'index purchase_ledger(status, last_checked_at)...");
+	await connection.query(
+		"CREATE INDEX idx_purchase_ledger_status_checked ON purchase_ledger (status, last_checked_at)",
+	);
 };
 
 // username n'a plus vocation à être unique (voir schema.sql) : c'est
@@ -261,7 +293,8 @@ const main = async (): Promise<void> => {
 		await ensureMatchReportsColumns(connection);
 		await ensureMatchHistoryColumns(connection);
 		await ensureMatchmakingTicketsColumns(connection);
-		await ensureQuestTableColumns(connection);
+		await ensureTableColumns(connection);
+		await ensurePurchaseLedgerIndex(connection);
 		console.log("✓ Schéma à jour, aucune donnée existante affectée.");
 	} finally {
 		await connection.end();
