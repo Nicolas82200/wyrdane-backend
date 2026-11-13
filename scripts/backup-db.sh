@@ -161,5 +161,31 @@ fi
 # Succes : c'est CE ping qui, par son absence, declencherait l'alerte externe.
 ping_healthcheck
 
+# Horodatage de la derniere sauvegarde reussie, relu par GET /api/health (donc
+# par la commande /status du bot Discord). La base plutot qu'un fichier : ce
+# script tourne sur l'hote, l'API dans un conteneur, et aucun volume n'est
+# partage entre les deux. Non fatal : la sauvegarde est faite, ce n'est que son
+# enregistrement qui echouerait.
+SIZE_H="$(du -h "$TARGET" | cut -f1)"
+docker compose exec -T -e MYSQL_PWD="$DB_PASSWORD" mysql \
+	mysql -u "$DB_USER" "$DB_NAME" -e \
+	"INSERT INTO system_status (\`key\`, value) VALUES ('last_backup_at', UTC_TIMESTAMP())
+	 ON DUPLICATE KEY UPDATE value = UTC_TIMESTAMP();" 2>/dev/null \
+	|| echo "[backup-db] note : horodatage non enregistre en base (sauvegarde faite malgre tout)" >&2
+
+# Confirmation Discord du succes. Volontairement limitee au dump HEBDOMADAIRE
+# (dimanche) : un message quotidien qui dit toujours « OK » devient du bruit
+# qu'on cesse de lire en une semaine, et c'est precisement ce qui fait rater la
+# fois ou il manque. Un rendez-vous hebdomadaire reste lisible, et l'alerte
+# d'echec, elle, part toujours immediatement.
+# Mettre BACKUP_NOTIFY_ALWAYS=1 dans .env pour recevoir aussi les quotidiennes.
+if [ -n "${DISCORD_CRASH_WEBHOOK_URL:-}" ] && { [ "$KIND" = "weekly" ] || [ "${BACKUP_NOTIFY_ALWAYS:-0}" = "1" ]; }; then
+	n_daily=$(find "$BACKUP_DIR/daily" -name 'wyrdane_*.sql.gz' -type f 2>/dev/null | wc -l)
+	n_weekly=$(find "$BACKUP_DIR/weekly" -name 'wyrdane_*.sql.gz' -type f 2>/dev/null | wc -l)
+	ok_payload="{\"thread_name\":\"Sauvegarde BDD\",\"content\":\":white_check_mark: Sauvegarde Wyrdane OK - ${SIZE_H}, ${n_daily} quotidiennes et ${n_weekly} hebdomadaires conservees\"}"
+	curl -fsS -m 15 -X POST -H 'Content-Type: application/json' \
+		-d "$ok_payload" "$DISCORD_CRASH_WEBHOOK_URL" >/dev/null || true
+fi
+
 trap - ERR
-echo "[backup-db] OK : $TARGET ($(du -h "$TARGET" | cut -f1))"
+echo "[backup-db] OK : $TARGET ($SIZE_H)"

@@ -395,4 +395,17 @@ CREATE TABLE IF NOT EXISTS user_pack_stock (
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
+-- État d'exploitation, écrit depuis l'EXTÉRIEUR de l'application : le script
+-- scripts/backup-db.sh y pose `last_backup_at` à chaque sauvegarde réussie, et
+-- la route /api/health le relit. Le script tourne sur l'hôte, l'API dans un
+-- conteneur, et aucun volume n'est partagé : la base est le seul endroit que
+-- les deux atteignent déjà, sans ajouter de montage.
+-- `key` est un mot réservé MySQL, d'où les backticks partout où il apparaît.
+CREATE TABLE IF NOT EXISTS system_status (
+  `key` VARCHAR(64) NOT NULL,
+  value VARCHAR(255) NOT NULL,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`key`)
+);
+
 INSERT IGNORE INTO wishlist_stats (id, count) VALUES (1, 0);
