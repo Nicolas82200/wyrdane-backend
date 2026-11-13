@@ -112,8 +112,16 @@ mkdir -p "$BACKUP_DIR/daily" "$BACKUP_DIR/weekly"
 
 # MYSQL_PWD (passé au conteneur via -e) plutôt que -p en ligne de commande :
 # le mot de passe n'apparaît alors pas dans la liste des processus.
+#
+# --no-tablespaces : sans lui, mysqldump 8 tente de lire les metadonnees de
+# tablespaces, ce qui exige le privilege PROCESS que le compte applicatif n'a
+# pas (et n'a aucune raison d'avoir). Le dump restait valide — ce sont des
+# metadonnees, pas des donnees — mais l'erreur s'imprimait dans le log du cron
+# CHAQUE NUIT. Un log qui crie en permanence est un log qu'on cesse de lire, et
+# c'est la qu'une vraie erreur se noierait. Constate le 2026-11-13 sur la
+# premiere execution automatique reelle.
 if ! docker compose exec -T -e MYSQL_PWD="$DB_PASSWORD" mysql \
-	mysqldump --single-transaction --quick --routines --events \
+	mysqldump --single-transaction --quick --routines --events --no-tablespaces \
 		--default-character-set=utf8mb4 \
 		-u "$DB_USER" "$DB_NAME" | gzip -9 > "$TARGET.part"; then
 	rm -f "$TARGET.part"
