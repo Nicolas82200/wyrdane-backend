@@ -48,6 +48,10 @@ services:
       TOKEN_SECRET: ${TOKEN_SECRET}
       STEAM_WEB_API_KEY: ${STEAM_WEB_API_KEY}
       STEAM_APP_ID: ${STEAM_APP_ID}
+      # Ouvre le niveau detaille de GET /api/health (fraicheur des sauvegardes).
+      # Doit etre declaree ICI et pas seulement dans .env : ce bloc est explicite,
+      # une variable absente de la liste n atteint jamais le conteneur.
+      HEALTH_KEY: ${HEALTH_KEY}
       DEV_GRANT_ALL_CARDS: "false"
       DEV_SKIP_STEAM_VERIFY: "false"
       ADMIN_STEAM_IDS: ${ADMIN_STEAM_IDS}
