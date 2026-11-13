@@ -112,8 +112,16 @@ mkdir -p "$BACKUP_DIR/daily" "$BACKUP_DIR/weekly"
 
 # MYSQL_PWD (passé au conteneur via -e) plutôt que -p en ligne de commande :
 # le mot de passe n'apparaît alors pas dans la liste des processus.
+#
+# --no-tablespaces : sans lui, mysqldump 8 tente de lire les metadonnees de
+# tablespaces, ce qui exige le privilege PROCESS que le compte applicatif n'a
+# pas (et n'a aucune raison d'avoir). Le dump restait valide — ce sont des
+# metadonnees, pas des donnees — mais l'erreur s'imprimait dans le log du cron
+# CHAQUE NUIT. Un log qui crie en permanence est un log qu'on cesse de lire, et
+# c'est la qu'une vraie erreur se noierait. Constate le 2026-11-13 sur la
+# premiere execution automatique reelle.
 if ! docker compose exec -T -e MYSQL_PWD="$DB_PASSWORD" mysql \
-	mysqldump --single-transaction --quick --routines --events \
+	mysqldump --single-transaction --quick --routines --events --no-tablespaces \
 		--default-character-set=utf8mb4 \
 		-u "$DB_USER" "$DB_NAME" | gzip -9 > "$TARGET.part"; then
 	rm -f "$TARGET.part"
@@ -161,5 +169,31 @@ fi
 # Succes : c'est CE ping qui, par son absence, declencherait l'alerte externe.
 ping_healthcheck
 
+# Horodatage de la derniere sauvegarde reussie, relu par GET /api/health (donc
+# par la commande /status du bot Discord). La base plutot qu'un fichier : ce
+# script tourne sur l'hote, l'API dans un conteneur, et aucun volume n'est
+# partage entre les deux. Non fatal : la sauvegarde est faite, ce n'est que son
+# enregistrement qui echouerait.
+SIZE_H="$(du -h "$TARGET" | cut -f1)"
+docker compose exec -T -e MYSQL_PWD="$DB_PASSWORD" mysql \
+	mysql -u "$DB_USER" "$DB_NAME" -e \
+	"INSERT INTO system_status (\`key\`, value) VALUES ('last_backup_at', UTC_TIMESTAMP())
+	 ON DUPLICATE KEY UPDATE value = UTC_TIMESTAMP();" 2>/dev/null \
+	|| echo "[backup-db] note : horodatage non enregistre en base (sauvegarde faite malgre tout)" >&2
+
+# Confirmation Discord du succes. Volontairement limitee au dump HEBDOMADAIRE
+# (dimanche) : un message quotidien qui dit toujours « OK » devient du bruit
+# qu'on cesse de lire en une semaine, et c'est precisement ce qui fait rater la
+# fois ou il manque. Un rendez-vous hebdomadaire reste lisible, et l'alerte
+# d'echec, elle, part toujours immediatement.
+# Mettre BACKUP_NOTIFY_ALWAYS=1 dans .env pour recevoir aussi les quotidiennes.
+if [ -n "${DISCORD_CRASH_WEBHOOK_URL:-}" ] && { [ "$KIND" = "weekly" ] || [ "${BACKUP_NOTIFY_ALWAYS:-0}" = "1" ]; }; then
+	n_daily=$(find "$BACKUP_DIR/daily" -name 'wyrdane_*.sql.gz' -type f 2>/dev/null | wc -l)
+	n_weekly=$(find "$BACKUP_DIR/weekly" -name 'wyrdane_*.sql.gz' -type f 2>/dev/null | wc -l)
+	ok_payload="{\"thread_name\":\"Sauvegarde BDD\",\"content\":\":white_check_mark: Sauvegarde Wyrdane OK - ${SIZE_H}, ${n_daily} quotidiennes et ${n_weekly} hebdomadaires conservees\"}"
+	curl -fsS -m 15 -X POST -H 'Content-Type: application/json' \
+		-d "$ok_payload" "$DISCORD_CRASH_WEBHOOK_URL" >/dev/null || true
+fi
+
 trap - ERR
-echo "[backup-db] OK : $TARGET ($(du -h "$TARGET" | cut -f1))"
+echo "[backup-db] OK : $TARGET ($SIZE_H)"

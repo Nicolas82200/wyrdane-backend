@@ -13,6 +13,7 @@ import crashReportRouter from "./crashReportRouter";
 import currencyRouter from "./currencyRouter";
 import deckRouter from "./deckRouter";
 import friendRouter from "./friendRouter";
+import healthRouter from "./healthRouter";
 import inviteRouter from "./inviteRouter";
 import levelRouter from "./levelRouter";
 import loginRewardRouter from "./loginRewardRouter";
@@ -48,6 +49,10 @@ router.use("/crash-report", crashReportRouter);
 router.use("/currency", authorization, requireCsrfHeader, currencyRouter);
 router.use("/decks", authorization, requireCsrfHeader, deckRouter);
 router.use("/friends", authorization, requireCsrfHeader, friendRouter);
+// Ni auth ni CSRF : un moniteur de disponibilite externe n'a ni cookie de
+// session ni jeton. Le detail operationnel est reserve au porteur de
+// HEALTH_KEY, voir healthController.
+router.use("/health", healthRouter);
 router.use("/invites", authorization, requireCsrfHeader, inviteRouter);
 router.use("/level", authorization, requireCsrfHeader, levelRouter);
 router.use("/login-reward", authorization, requireCsrfHeader, loginRewardRouter);
