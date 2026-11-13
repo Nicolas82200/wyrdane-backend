@@ -294,16 +294,49 @@ CREATE TABLE IF NOT EXISTS user_cosmetics (
   UNIQUE KEY unique_user_item (user_id, item_id)
 );
 
+-- Prix par devise, pour les devises AUTRES QUE L'EURO. L'euro reste porté par
+-- `cosmetic_items.price_cents` : une seule source par devise, donc aucune
+-- paire de valeurs à tenir d'accord (ce projet s'est déjà fait prendre trois
+-- fois par une copie manuelle divergente). `shopModel.resolvePrice` applique
+-- exactement cette règle — EUR vient de l'item, le reste de cette table.
+--
+-- `amount` est dans les UNITÉS MINEURES de la devise : des cents pour USD ou
+-- GBP, mais des yens entiers pour JPY, qui n'a pas de subdivision. Ne jamais
+-- supposer deux décimales.
+--
+-- Une devise absente ici n'est PAS facturée en euros par défaut : l'achat est
+-- refusé (voir shopController.initPurchase). Facturer 1,99 € à un joueur à qui
+-- on a affiché un prix en dollars serait pire qu'un refus clair.
+CREATE TABLE IF NOT EXISTS cosmetic_item_prices (
+  item_id INT NOT NULL,
+  currency CHAR(3) NOT NULL,
+  amount INT NOT NULL,
+  PRIMARY KEY (item_id, currency),
+  FOREIGN KEY (item_id) REFERENCES cosmetic_items(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS purchase_ledger (
   id INT AUTO_INCREMENT PRIMARY KEY,
   user_id INT NOT NULL,
   item_id INT NOT NULL,
   order_id BIGINT NOT NULL UNIQUE,
   steam_txn_id VARCHAR(64),
+  -- 'pending' | 'processing' | 'completed' | 'failed' | 'refunded'
   status VARCHAR(20) NOT NULL DEFAULT 'pending',
+  -- Montant et devise RÉELLEMENT demandés à Steam, figés à l'ouverture de la
+  -- transaction : un changement de prix ultérieur ne doit pas réécrire
+  -- l'historique de ce qui a été facturé.
+  amount INT,
+  currency CHAR(3),
+  -- Dernière interrogation de QueryTxn pour cette commande (voir
+  -- helper/shopReconciler.ts) : sert à étaler la surveillance des
+  -- remboursements au lieu de re-questionner tout l'historique à chaque tour.
+  last_checked_at TIMESTAMP NULL DEFAULT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-  FOREIGN KEY (item_id) REFERENCES cosmetic_items(id) ON DELETE CASCADE
+  FOREIGN KEY (item_id) REFERENCES cosmetic_items(id) ON DELETE CASCADE,
+  -- Le réconciliateur balaie par (statut, ancienneté) à chaque tour.
+  INDEX idx_purchase_ledger_status_checked (status, last_checked_at)
 );
 
 CREATE TABLE IF NOT EXISTS currency_ledger (
@@ -424,3 +457,43 @@ INSERT IGNORE INTO cosmetic_items (steam_item_id, name, category, price_cents) V
   ('card_back_crimson', 'Dos pourpre',   'card_back', 299),
   ('card_back_emerald', 'Dos émeraude',  'card_back', 399),
   ('card_back_violet',  'Dos améthyste', 'card_back', 499);
+
+-- Prix hors zone euro. L'euro n'est PAS répété ici, il vient de
+-- cosmetic_items.price_cents (voir le commentaire de la table).
+--
+-- Jointure sur steam_item_id et non sur un id codé en dur : `id` est
+-- auto-incrémenté, sa valeur dépend de l'ordre d'insertion et diffère donc
+-- d'une base à l'autre. steam_item_id, lui, est l'identifiant stable.
+--
+-- ⚠ JPY est en unités ENTIÈRES (240 = 240 ¥, pas 2,40 ¥) : le yen n'a pas de
+-- subdivision. Ajouter une devise sans décimales demande donc de penser le
+-- montant dans son unité mineure réelle, pas de recopier un prix en centimes.
+--
+-- Une devise absente fait refuser l'achat avec un message clair (409), elle ne
+-- retombe jamais sur l'euro. Ajouter un marché = ajouter quatre lignes ici,
+-- plus la grille correspondante côté dashboard Steamworks.
+INSERT IGNORE INTO cosmetic_item_prices (item_id, currency, amount)
+SELECT ci.id, p.currency, p.amount
+FROM cosmetic_items ci
+JOIN (
+  SELECT 'card_back_gold' AS steam_item_id, 'USD' AS currency, 199 AS amount
+  UNION ALL SELECT 'card_back_crimson', 'USD', 299
+  UNION ALL SELECT 'card_back_emerald', 'USD', 399
+  UNION ALL SELECT 'card_back_violet',  'USD', 499
+  UNION ALL SELECT 'card_back_gold',    'GBP', 169
+  UNION ALL SELECT 'card_back_crimson', 'GBP', 249
+  UNION ALL SELECT 'card_back_emerald', 'GBP', 329
+  UNION ALL SELECT 'card_back_violet',  'GBP', 419
+  UNION ALL SELECT 'card_back_gold',    'CAD', 269
+  UNION ALL SELECT 'card_back_crimson', 'CAD', 399
+  UNION ALL SELECT 'card_back_emerald', 'CAD', 529
+  UNION ALL SELECT 'card_back_violet',  'CAD', 659
+  UNION ALL SELECT 'card_back_gold',    'AUD', 299
+  UNION ALL SELECT 'card_back_crimson', 'AUD', 449
+  UNION ALL SELECT 'card_back_emerald', 'AUD', 599
+  UNION ALL SELECT 'card_back_violet',  'AUD', 749
+  UNION ALL SELECT 'card_back_gold',    'JPY', 240
+  UNION ALL SELECT 'card_back_crimson', 'JPY', 360
+  UNION ALL SELECT 'card_back_emerald', 'JPY', 480
+  UNION ALL SELECT 'card_back_violet',  'JPY', 600
+) AS p ON p.steam_item_id = ci.steam_item_id;

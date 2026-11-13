@@ -254,7 +254,9 @@ Branchée dans les mêmes points d'entrée que les autres pistes (`rewardsContro
 
 ### Boutique à argent réel (microtransactions Steam)
 
-`shopRouter` / `shopController.ts` / `shopModel.ts` / `helper/steamMicrotxnHelper.ts`, tables `cosmetic_items` (catalogue vendable, seedé par `schema_sync.sql`), `user_cosmetics` (possession) et `purchase_ledger` (commandes). **En service côté client depuis le 2026-11-13** pour les dos de carte (voir `scripts/shop/ShopPurchase.gd` et `docs/monetization.md` § 5 côté `card-game`).
+`shopRouter` / `shopController.ts` / `shopModel.ts` / `helper/steamMicrotxnHelper.ts` / `helper/shopReconciler.ts`, tables `cosmetic_items` (catalogue vendable, seedé par `schema_sync.sql`), `cosmetic_item_prices` (prix hors euro), `user_cosmetics` (possession) et `purchase_ledger` (commandes).
+
+⚠ **Nécessite un `db:sync` en prod** (table `cosmetic_item_prices`, colonnes `purchase_ledger.amount`/`currency`/`last_checked_at`, index `idx_purchase_ledger_status_checked`) — voir « Appliquer un changement de schéma en prod ». **En service côté client depuis le 2026-11-13** pour les dos de carte (voir `scripts/shop/ShopPurchase.gd` et `docs/monetization.md` § 5 côté `card-game`).
 
 Quatre routes : `GET /api/shop/catalog`, `GET /api/shop/cosmetics/me`, `POST /api/shop/init-txn` (`{itemId}` → `{orderId, transId}`), `POST /api/shop/finalize-txn` (`{orderId}`). L'id auto-incrémenté de `purchase_ledger` **sert d'`orderid`** exigé par `InitTxn`, pas besoin d'un générateur séparé. `finalize-txn` verrouille la ligne (`SELECT ... FOR UPDATE`, `pending` → `processing`) avant d'appeler Steam : deux appels concurrents pour le même `orderId` (double-clic, retry réseau) sérialisent au lieu de déclencher deux `FinalizeTxn`.
 
@@ -262,7 +264,14 @@ Quatre routes : `GET /api/shop/catalog`, `GET /api/shop/cosmetics/me`, `POST /ap
 
 **Tester sans dépenser d'argent réel** : `STEAM_MICROTXN_SANDBOX=1` bascule les deux appels sur `ISteamMicroTxnSandbox` (même signature). Rien à changer côté jeu. Réservé aux comptes avec accès développeur à l'AppID, et à ne jamais laisser actif en production — le serveur l'avertit au démarrage si `NODE_ENV=production`.
 
-**Non implémenté, assumé** (voir § 5.3 de `docs/monetization.md` côté `card-game`) : aucune reprise des commandes restées `pending`/`processing` (un joueur qui ferme le jeu après avoir payé n'est rattrapé qu'à la main — il faudrait un travail périodique sur `QueryTxn`), `currency: "EUR"` en dur avec un seul prix par item, et aucune révocation de `user_cosmetics` sur remboursement Valve.
+**Rattrapage et remboursements** (`helper/shopReconciler.ts`, démarré depuis `index.ts` et non à l'import, pour qu'un test n'allume ni minuteur ni requête). Un tour toutes les 5 minutes, plus un 30 s après le démarrage :
+
+- **Commandes dont on n'a pas vu la fin** (`pending`/`processing` de plus de 15 min) : `QueryTxn` tranche — `Approved` → `FinalizeTxn` puis crédit (c'est le joueur qui a payé puis fermé le jeu), `Succeeded` → crédit direct, échec/remboursement → commande close, `Init` au-delà de 24 h → abandon. `processing` est inclus exprès : une finalisation interrompue par un redémarrage y reste coincée.
+- **Remboursements** : Steam ne notifie rien. Les commandes `completed` de moins de 180 jours sont re-questionnées une fois par 24 h, 25 par tour (colonne `purchase_ledger.last_checked_at` pour étaler). Sur `Refunded`/`PartialRefund`/`Chargeback`/`RevokedByDevParams`, `revokePurchase` retire la ligne de `user_cosmetics` en transaction — sauf si le joueur a racheté l'article depuis.
+
+⚠ **Un `queryTxn` qui renvoie `null` (API muette) ne conclut RIEN.** Traiter un silence comme un échec de paiement annulerait des achats valides. Ce point est couvert par un test dédié, ne pas le « simplifier ».
+
+**Devises.** `GetUserInfo` donne la devise du portefeuille du joueur (mémorisée 1 h par SteamID). Une seule source de prix par devise : **EUR → `cosmetic_items.price_cents`**, **toutes les autres → table `cosmetic_item_prices`** — l'euro n'y est volontairement pas répété, pour n'avoir aucune paire de valeurs à tenir d'accord. `GET /api/shop/catalog` renvoie les prix dans la devise du joueur (code ISO inclus, `price_cents: null` si l'article n'y est pas vendu) et `initPurchase` refuse l'achat en **409** dans ce cas — jamais de repli silencieux sur l'euro, que Steam refuserait de toute façon. `amount` est en **unités mineures** de la devise : 240 pour ¥240, le yen n'ayant pas de subdivision. Ajouter un marché = quatre lignes dans `cosmetic_item_prices` + la grille correspondante côté dashboard Steamworks.
 
 ## Tests automatisés
 
@@ -295,6 +304,10 @@ docker compose exec backend node dist/database/sync.js
 (`db:migrate`/`dist/database/migrate.js` de la même façon, mais c'est une commande destructive réservée au dev/CI — jamais contre la base de prod.)
 
 ⚠ **À faire après le déploiement de la refonte des quêtes (2026-11-02)** : nouvelle table `user_pack_stock` (packs par race) et nouvelles colonnes `daily_quests.reward_xp`, `weekly_quests.reward_currency`/`reward_xp`/`last_progress_date`, `monthly_quests.reward_xp`/`reward_pack_race`/`meta`, `match_reports.resource_cards_by_race`. Sans ce `db:sync`, les routes de quêtes et de packs répondent **500** (et non 404, elles sont bien déployées) — c'est exactement le scénario déjà rencontré quatre fois.
+
+⚠ **À faire après le déploiement de la boutique à argent réel (2026-11-13)** : nouvelle table `cosmetic_item_prices` (prix hors euro) et nouvelles colonnes `purchase_ledger.amount`/`currency`/`last_checked_at`, plus l'index `idx_purchase_ledger_status_checked`. Sans ce `db:sync`, les routes `/api/shop/*` répondent **500** et le réconciliateur échoue à chaque tour (journalisé toutes les 5 min).
+
+Note pour un futur ajout de colonne : passer par `TABLE_COLUMNS_TO_ENSURE` dans `src/database/sync.ts`, qui est le tableau générique prévu pour ça — les six `ensure<Table>Columns` qui le précèdent sont la même boucle recopiée par table, écrite avant qu'il existe. Ne pas en ajouter une septième.
 
 ### Sauvegardes de la base (`scripts/backup-db.sh`)
 
