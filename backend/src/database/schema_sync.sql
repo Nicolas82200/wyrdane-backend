@@ -409,3 +409,18 @@ CREATE TABLE IF NOT EXISTS system_status (
 );
 
 INSERT IGNORE INTO wishlist_stats (id, count) VALUES (1, 0);
+
+-- Catalogue vendable de la boutique. `steam_item_id` est la clé de liaison
+-- avec le jeu (voir CARD_BACKS dans scripts/settings/CardBackShop.gd côté
+-- client) ET l'itemid déclaré à Steam : le renommer casse les deux, au même
+-- titre qu'un nom de carte (voir « Lien carte client↔backend »).
+-- price_cents est le montant réellement encaissé par Steam, en centimes
+-- d'euro : c'est CETTE valeur qui fait foi, celle du client n'est qu'un repli
+-- d'affichage le temps que ce catalogue arrive.
+-- INSERT IGNORE : rejouable à chaque démarrage sans écraser un prix modifié
+-- en base (changer un prix se fait par un UPDATE explicite, pas ici).
+INSERT IGNORE INTO cosmetic_items (steam_item_id, name, category, price_cents) VALUES
+  ('card_back_gold',    'Dos doré',      'card_back', 199),
+  ('card_back_crimson', 'Dos pourpre',   'card_back', 299),
+  ('card_back_emerald', 'Dos émeraude',  'card_back', 399),
+  ('card_back_violet',  'Dos améthyste', 'card_back', 499);

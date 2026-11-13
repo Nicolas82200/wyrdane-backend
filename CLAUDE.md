@@ -54,7 +54,7 @@ Deux flows cohabitent, tous deux terminés par le même JWT en cookie httpOnly :
 
 **Pourquoi `linked_accounts` plutôt qu'une colonne `steam_id` sur `users`** : ça garde la porte ouverte à d'autres providers (email, Google, Apple Sign-In) si un client mobile voit le jour un jour, sans avoir à migrer le schéma ni changer l'identifiant interne du joueur (`user_id`) qui porte déjà collection/decks/progression.
 
-Variables d'environnement nécessaires (voir `.env.sample`) : `STEAM_WEB_API_KEY` et `STEAM_APP_ID` (clé Web API générée sur https://partner.steamgames.com pour l'AppID du jeu), `ADMIN_STEAM_IDS` (comptes admin).
+Variables d'environnement nécessaires (voir `.env.sample`) : `STEAM_WEB_API_KEY` et `STEAM_APP_ID` (clé Web API générée sur https://partner.steamgames.com pour l'AppID du jeu), `ADMIN_STEAM_IDS` (comptes admin), `STEAM_MICROTXN_SANDBOX` (achats de boutique en bac à sable, voir « Boutique à argent réel » plus bas).
 
 ## Admin & analytics
 
@@ -251,6 +251,18 @@ Table `onboarding_quests` (`onboardingQuestModel.ts`, `ONBOARDING_QUEST_TEMPLATE
 `ensureOnboardingQuests` **backfille** directement les paliers `reach_level` déjà dépassés au moment de l'insertion (comparaison avec le niveau courant du joueur) : un joueur déjà niveau 12 quand cette piste est déployée reçoit d'emblée les paliers 5 et 10 comme acquis, plutôt que de ne plus jamais pouvoir les valider (le hook de progression normal ne se déclenche que sur un futur passage de niveau réel, pas rétroactivement). Un vétéran bien au-delà du niveau 25 récupère ainsi, à sa première ouverture du menu Quêtes après déploiement, les paliers `reach_level` en attente de réclamation (il les a par définition déjà tous atteints) mais aucun des autres objectifs, jamais insérés avec une progression positive.
 
 Branchée dans les mêmes points d'entrée que les autres pistes (`rewardsController.reportSoloMatch`, `rankedController.reportMatch` pour `win`/`win_ranked`/`play_network`), plus deux points d'entrée propres : `levelModel.applyXp` (après `grantLevelReward`, un appel par niveau franchi — volontairement hors de la transaction XP en cours, même choix que `packModel.progressForPackOpen`) pour `reach_level`, et `packModel.openPack` (uniquement sur un achat réel) pour `buy_packs`. `POST /api/quests/onboarding/:id/claim` (verrouillé `FOR UPDATE`, même garde-fou que `claimQuest`/`claimUniqueQuest`).
+
+### Boutique à argent réel (microtransactions Steam)
+
+`shopRouter` / `shopController.ts` / `shopModel.ts` / `helper/steamMicrotxnHelper.ts`, tables `cosmetic_items` (catalogue vendable, seedé par `schema_sync.sql`), `user_cosmetics` (possession) et `purchase_ledger` (commandes). **En service côté client depuis le 2026-11-13** pour les dos de carte (voir `scripts/shop/ShopPurchase.gd` et `docs/monetization.md` § 5 côté `card-game`).
+
+Quatre routes : `GET /api/shop/catalog`, `GET /api/shop/cosmetics/me`, `POST /api/shop/init-txn` (`{itemId}` → `{orderId, transId}`), `POST /api/shop/finalize-txn` (`{orderId}`). L'id auto-incrémenté de `purchase_ledger` **sert d'`orderid`** exigé par `InitTxn`, pas besoin d'un générateur séparé. `finalize-txn` verrouille la ligne (`SELECT ... FOR UPDATE`, `pending` → `processing`) avant d'appeler Steam : deux appels concurrents pour le même `orderId` (double-clic, retry réseau) sérialisent au lieu de déclencher deux `FinalizeTxn`.
+
+⚠ **`steam_item_id` est un identifiant, pas un libellé** : c'est à la fois l'`itemid` déclaré côté dashboard Steamworks et la clé de liaison avec le catalogue client (`CARD_BACKS` dans `scripts/settings/CardBackShop.gd`). Le renommer casse les deux silencieusement — même piège que `card_name` pour les cartes.
+
+**Tester sans dépenser d'argent réel** : `STEAM_MICROTXN_SANDBOX=1` bascule les deux appels sur `ISteamMicroTxnSandbox` (même signature). Rien à changer côté jeu. Réservé aux comptes avec accès développeur à l'AppID, et à ne jamais laisser actif en production — le serveur l'avertit au démarrage si `NODE_ENV=production`.
+
+**Non implémenté, assumé** (voir § 5.3 de `docs/monetization.md` côté `card-game`) : aucune reprise des commandes restées `pending`/`processing` (un joueur qui ferme le jeu après avoir payé n'est rattrapé qu'à la main — il faudrait un travail périodique sur `QueryTxn`), `currency: "EUR"` en dur avec un seul prix par item, et aucune révocation de `user_cosmetics` sur remboursement Valve.
 
 ## Tests automatisés
 

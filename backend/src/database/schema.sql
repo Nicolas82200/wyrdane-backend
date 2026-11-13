@@ -635,3 +635,11 @@ CREATE TABLE user_pack_stock (
 );
 
 INSERT INTO wishlist_stats (id, count) VALUES (1, 0);
+
+-- Catalogue vendable de la boutique, voir le commentaire détaillé dans
+-- schema_sync.sql (les deux fichiers doivent rester d'accord).
+INSERT INTO cosmetic_items (steam_item_id, name, category, price_cents) VALUES
+  ('card_back_gold',    'Dos doré',      'card_back', 199),
+  ('card_back_crimson', 'Dos pourpre',   'card_back', 299),
+  ('card_back_emerald', 'Dos émeraude',  'card_back', 399),
+  ('card_back_violet',  'Dos améthyste', 'card_back', 499);

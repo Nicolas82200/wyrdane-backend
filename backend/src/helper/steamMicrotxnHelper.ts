@@ -1,6 +1,31 @@
 // Wrap l'API Web Steamworks Microtransactions : InitTxn démarre l'achat côté
 // serveur, FinalizeTxn le confirme une fois que Steam a débité le joueur.
 // Documentation : https://partner.steamgames.com/doc/webapi/ISteamMicroTxn
+//
+// Bac à sable (tester un achat sans dépenser d'argent réel) : STEAM_MICROTXN_SANDBOX
+// à "1"/"true" bascule les DEUX appels sur l'interface ISteamMicroTxnSandbox.
+// L'overlay d'achat s'affiche et se comporte exactement comme en vrai, mais
+// aucun compte n'est débité et rien n'apparaît dans l'historique d'achats Steam
+// du joueur — c'est l'équivalent Steam des cartes de test Stripe. Côté jeu il
+// n'y a rien à changer : le client ne connaît que /api/shop (voir
+// BackendClient.shop_init_txn), il ne sait pas quelle interface est utilisée.
+//
+// ⚠ Le bac à sable n'est utilisable que par les comptes ayant un accès
+// développeur à l'AppID, et il ne doit JAMAIS rester actif en production :
+// chaque achat y serait gratuit. D'où l'avertissement au démarrage ci-dessous.
+
+const SANDBOX = ["1", "true", "yes"].includes(
+	(process.env.STEAM_MICROTXN_SANDBOX ?? "").toLowerCase(),
+);
+
+const MICROTXN_INTERFACE = SANDBOX ? "ISteamMicroTxnSandbox" : "ISteamMicroTxn";
+
+if (SANDBOX && process.env.NODE_ENV === "production") {
+	console.warn(
+		"⚠️  STEAM_MICROTXN_SANDBOX actif en production : tous les achats de la " +
+			"boutique sont gratuits et ne débitent personne. À retirer.",
+	);
+}
 
 interface InitTxnItem {
 	itemId: string;
@@ -32,7 +57,7 @@ const initTxn = async (
 ): Promise<string | null> => {
 	const { STEAM_WEB_API_KEY, STEAM_APP_ID } = process.env;
 	const url = new URL(
-		"https://partner.steam-api.com/ISteamMicroTxn/InitTxn/v3/",
+		`https://partner.steam-api.com/${MICROTXN_INTERFACE}/InitTxn/v3/`,
 	);
 
 	const body = new URLSearchParams({
@@ -60,7 +85,7 @@ const initTxn = async (
 const finalizeTxn = async (orderId: number): Promise<boolean> => {
 	const { STEAM_WEB_API_KEY, STEAM_APP_ID } = process.env;
 	const url = new URL(
-		"https://partner.steam-api.com/ISteamMicroTxn/FinalizeTxn/v2/",
+		`https://partner.steam-api.com/${MICROTXN_INTERFACE}/FinalizeTxn/v2/`,
 	);
 
 	const body = new URLSearchParams({
