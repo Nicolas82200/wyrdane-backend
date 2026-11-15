@@ -157,10 +157,14 @@ const deleteUserData = async (userId: number): Promise<void> => {
 		await connection.query("DELETE FROM decks WHERE user_id = ?", [userId]);
 		await connection.query("DELETE FROM user_cards WHERE user_id = ?", [userId]);
 		await connection.query("DELETE FROM user_cosmetics WHERE user_id = ?", [userId]);
+		// Stock de packs non ouverts : une progression comme une autre, et le
+		// `free_packs` du compte est remis à zéro juste en dessous.
+		await connection.query("DELETE FROM user_pack_stock WHERE user_id = ?", [userId]);
 		await connection.query("DELETE FROM daily_quests WHERE user_id = ?", [userId]);
 		await connection.query("DELETE FROM weekly_quests WHERE user_id = ?", [userId]);
 		await connection.query("DELETE FROM monthly_quests WHERE user_id = ?", [userId]);
 		await connection.query("DELETE FROM unique_quests WHERE user_id = ?", [userId]);
+		await connection.query("DELETE FROM onboarding_quests WHERE user_id = ?", [userId]);
 		await connection.query("DELETE FROM login_rewards WHERE user_id = ?", [userId]);
 		await connection.query("DELETE FROM level_rewards WHERE user_id = ?", [userId]);
 		await connection.query("DELETE FROM solo_stats WHERE user_id = ?", [userId]);
