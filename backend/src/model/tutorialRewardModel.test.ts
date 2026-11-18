@@ -17,7 +17,13 @@ vi.mock("./currencyModel", () => ({
 import db from "./db";
 import { grantCard, getOwnedQuantity } from "./collectionModel";
 import { credit, getBalance } from "./currencyModel";
-import { TUTORIAL_REWARD_CARDS, TUTORIAL_RARITY_WEIGHTS, pickByRarity, claimTutorialReward } from "./tutorialRewardModel";
+import {
+	TUTORIAL_REWARD_CARDS,
+	TUTORIAL_REWARD_RARITY_COUNTS,
+	rewardRaritySequence,
+	pickOfRarity,
+	claimTutorialReward,
+} from "./tutorialRewardModel";
 
 const mockedDb = db as unknown as { query: ReturnType<typeof vi.fn>; getConnection: ReturnType<typeof vi.fn> };
 const mockedGrantCard = grantCard as ReturnType<typeof vi.fn>;
@@ -35,40 +41,37 @@ const poolByRarity = () =>
 		["Légendaire", [card(5, "Légendaire")]],
 	]);
 
-describe("TUTORIAL_RARITY_WEIGHTS", () => {
-	it("matches the 40/30/20/10 split", () => {
-		expect(TUTORIAL_RARITY_WEIGHTS).toEqual({ Commune: 40, Rare: 30, "Épique": 20, "Légendaire": 10 });
-		expect(Object.values(TUTORIAL_RARITY_WEIGHTS).reduce((a, b) => a + b, 0)).toBe(100);
+describe("TUTORIAL_REWARD_RARITY_COUNTS", () => {
+	it("is the fixed 10/6/3/1 composition", () => {
+		expect(TUTORIAL_REWARD_RARITY_COUNTS).toEqual({ Commune: 10, Rare: 6, "Épique": 3, "Légendaire": 1 });
+		expect(TUTORIAL_REWARD_CARDS).toBe(20);
 	});
 });
 
-describe("pickByRarity", () => {
+describe("rewardRaritySequence", () => {
+	it("lists one entry per card, commons first and the legendary last", () => {
+		const sequence = rewardRaritySequence();
+		expect(sequence).toHaveLength(TUTORIAL_REWARD_CARDS);
+		expect(sequence.filter((r) => r === "Commune")).toHaveLength(10);
+		expect(sequence.filter((r) => r === "Rare")).toHaveLength(6);
+		expect(sequence.filter((r) => r === "Épique")).toHaveLength(3);
+		expect(sequence[0]).toBe("Commune");
+		expect(sequence[sequence.length - 1]).toBe("Légendaire");
+	});
+});
+
+describe("pickOfRarity", () => {
 	beforeEach(() => vi.restoreAllMocks());
 
-	it("picks the rarity by weight, independently of how many cards each rarity holds", () => {
-		// 2 communes contre 1 de chaque autre rareté : un tirage pondéré par
-		// CARTE (packModel.pickWeighted) déséquilibrerait le ratio, pas celui-ci.
+	it("picks a card of the requested rarity", () => {
+		expect(pickOfRarity(poolByRarity() as never, "Épique").rarity).toBe("Épique");
+		expect(pickOfRarity(poolByRarity() as never, "Légendaire").rarity).toBe("Légendaire");
+	});
+
+	it("falls back to another rarity when the catalogue holds none of it", () => {
 		const pool = poolByRarity();
-		vi.spyOn(Math, "random").mockReturnValueOnce(0.5).mockReturnValueOnce(0);
-		// roll = 0.5 * 100 = 50 → Commune (40) épuisé, Rare (30) atteint.
-		expect(pickByRarity(pool as never).rarity).toBe("Rare");
-	});
-
-	it("lands on Commune for a low roll", () => {
-		vi.spyOn(Math, "random").mockReturnValueOnce(0.1).mockReturnValueOnce(0);
-		expect(pickByRarity(poolByRarity() as never).rarity).toBe("Commune");
-	});
-
-	it("lands on Légendaire for the highest rolls", () => {
-		vi.spyOn(Math, "random").mockReturnValueOnce(0.95).mockReturnValueOnce(0);
-		expect(pickByRarity(poolByRarity() as never).rarity).toBe("Légendaire");
-	});
-
-	it("ignores a rarity with no card in the catalogue", () => {
-		const pool = poolByRarity();
-		pool.set("Commune", []);
-		vi.spyOn(Math, "random").mockReturnValueOnce(0.01).mockReturnValueOnce(0);
-		expect(pickByRarity(pool as never).rarity).toBe("Rare");
+		pool.set("Légendaire", []);
+		expect(pickOfRarity(pool as never, "Légendaire").rarity).not.toBe("Légendaire");
 	});
 });
 
@@ -103,7 +106,7 @@ describe("claimTutorialReward", () => {
 		expect(result.cards).toHaveLength(TUTORIAL_REWARD_CARDS);
 		// Catalogue de test volontairement minuscule (4 cartes) : au-delà de
 		// MAX_COPIES_PER_CARD exemplaires d'une même carte, le tirage bascule en
-		// poussière — les deux chemins réunis couvrent toujours les 25 tirages.
+		// poussière — les deux chemins réunis couvrent toujours les 20 tirages.
 		expect(mockedGrantCard.mock.calls.length + mockedCredit.mock.calls.length).toBe(TUTORIAL_REWARD_CARDS);
 		expect(mockedGrantCard).toHaveBeenCalled();
 		expect(connection.query).toHaveBeenLastCalledWith(expect.stringContaining("tutorial_reward_claimed_at = NOW()"), [1]);
