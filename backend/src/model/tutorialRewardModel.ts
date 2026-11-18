@@ -12,17 +12,26 @@ import type { Cards } from "../types";
 // Enchantement avant d'en ouvrir des packs. Ce lot de 20 cartes tirées dans
 // TOUT le catalogue (hors ressources) comble ce trou dès la sortie du
 // tutoriel.
-const TUTORIAL_REWARD_CARDS = 20;
-
-// Pondération volontairement bien plus généreuse que celle des packs
-// (packModel.RARITY_WEIGHTS, 58/25/12/5) : c'est une récompense unique, pas
-// une source récurrente — elle sert à faire découvrir les raretés hautes.
-const TUTORIAL_RARITY_WEIGHTS: Record<string, number> = {
-	Commune: 40,
-	Rare: 30,
-	Épique: 20,
-	Légendaire: 10,
+//
+// Composition FIXE depuis le 2026-11-18 (demande utilisateur) : plus aucun
+// tirage de rareté, le lot contient toujours exactement 10 communes, 6 rares,
+// 3 épiques et 1 légendaire. Le client en fait quatre "ouvertures de pack"
+// successives, une par rareté (voir PackShop.REWARD_RARITY_COLUMNS côté jeu) :
+// un lot de taille variable y casserait les grilles annoncées (2x5, 2x3, 1x3,
+// 1 seule carte). Avant, les raretés étaient tirées au sort en 40/30/20/10.
+const TUTORIAL_REWARD_RARITY_COUNTS: Record<string, number> = {
+	Commune: 10,
+	Rare: 6,
+	Épique: 3,
+	Légendaire: 1,
 };
+
+const TUTORIAL_REWARD_CARDS = Object.values(TUTORIAL_REWARD_RARITY_COUNTS).reduce((a, b) => a + b, 0);
+
+// La liste des raretés à tirer, dans l'ordre d'annonce côté client (communes
+// d'abord, légendaire en dernier) : un élément par carte du lot.
+const rewardRaritySequence = (): string[] =>
+	Object.entries(TUTORIAL_REWARD_RARITY_COUNTS).flatMap(([rarity, count]) => Array<string>(count).fill(rarity));
 
 interface DrawableCardRow extends Cards, RowDataPacket {}
 
@@ -31,30 +40,25 @@ interface TutorialRewardCard extends DrawableCardRow {
 	goldEarned: number;
 }
 
-// Tire une carte par rareté d'abord, puis uniformément parmi les cartes de
-// cette rareté — contrairement à packModel.pickWeighted, qui pondère chaque
-// CARTE par le poids de sa rareté et fait donc dépendre les probabilités
-// réelles du nombre de cartes existantes par rareté. Ici les 40/30/20/10
-// demandés doivent être exactement respectés.
-const pickByRarity = (poolByRarity: Map<string, DrawableCardRow[]>): DrawableCardRow => {
-	const available = [...poolByRarity.entries()].filter(([, cards]) => cards.length > 0);
-	const total = available.reduce((sum, [rarity]) => sum + (TUTORIAL_RARITY_WEIGHTS[rarity] ?? 0), 0);
-	let roll = Math.random() * total;
-	for (const [rarity, cards] of available) {
-		roll -= TUTORIAL_RARITY_WEIGHTS[rarity] ?? 0;
-		if (roll <= 0) return cards[Math.floor(Math.random() * cards.length)];
-	}
-	const [, fallback] = available[available.length - 1];
-	return fallback[Math.floor(Math.random() * fallback.length)];
+// Tire uniformément une carte de la rareté demandée. Repli sur n'importe
+// quelle autre rareté non vide si le catalogue n'en contient aucune de celle-là
+// (catalogue incomplet en développement) : mieux vaut un lot complet d'une
+// rareté approchante qu'une récompense tronquée.
+const pickOfRarity = (poolByRarity: Map<string, DrawableCardRow[]>, rarity: string): DrawableCardRow => {
+	const cards = poolByRarity.get(rarity) ?? [];
+	if (cards.length > 0) return cards[Math.floor(Math.random() * cards.length)];
+	const fallback = [...poolByRarity.values()].filter((group) => group.length > 0);
+	const group = fallback[Math.floor(Math.random() * fallback.length)];
+	return group[Math.floor(Math.random() * group.length)];
 };
 
 const fetchPoolByRarity = async (): Promise<Map<string, DrawableCardRow[]>> => {
 	const [rows] = await db.query<DrawableCardRow[]>(
 		"SELECT * FROM cards WHERE card_type != 'Ressource' AND rarity IN (?)",
-		[Object.keys(TUTORIAL_RARITY_WEIGHTS)],
+		[Object.keys(TUTORIAL_REWARD_RARITY_COUNTS)],
 	);
 	const byRarity = new Map<string, DrawableCardRow[]>();
-	for (const rarity of Object.keys(TUTORIAL_RARITY_WEIGHTS)) byRarity.set(rarity, []);
+	for (const rarity of Object.keys(TUTORIAL_REWARD_RARITY_COUNTS)) byRarity.set(rarity, []);
 	for (const row of rows) byRarity.get(row.rarity)?.push(row);
 	return byRarity;
 };
@@ -93,8 +97,8 @@ const claimTutorialReward = async (
 
 		const pendingQuantities = new Map<number, number>();
 		const cards: TutorialRewardCard[] = [];
-		for (let i = 0; i < TUTORIAL_REWARD_CARDS; i++) {
-			const card = pickByRarity(poolByRarity);
+		for (const rarity of rewardRaritySequence()) {
+			const card = pickOfRarity(poolByRarity, rarity);
 			const projected = (await getOwnedQuantity(userId, card.id, connection)) + (pendingQuantities.get(card.id) ?? 0);
 			if (projected >= MAX_COPIES_PER_CARD) {
 				const goldEarned = DUST_VALUE_BY_RARITY[card.rarity] ?? 0;
@@ -121,8 +125,9 @@ const claimTutorialReward = async (
 export type { TutorialRewardCard };
 export {
 	TUTORIAL_REWARD_CARDS,
-	TUTORIAL_RARITY_WEIGHTS,
-	pickByRarity,
+	TUTORIAL_REWARD_RARITY_COUNTS,
+	rewardRaritySequence,
+	pickOfRarity,
 	hasClaimed,
 	claimTutorialReward,
 };
