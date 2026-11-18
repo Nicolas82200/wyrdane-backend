@@ -48,6 +48,12 @@ services:
       TOKEN_SECRET: ${TOKEN_SECRET}
       STEAM_WEB_API_KEY: ${STEAM_WEB_API_KEY}
       STEAM_APP_ID: ${STEAM_APP_ID}
+      # Bac a sable des microtransactions : bascule InitTxn/FinalizeTxn sur
+      # ISteamMicroTxnSandbox pour tester un achat sans debiter personne (voir
+      # helper/steamMicrotxnHelper.ts et docs/monetization.md § 5.1 cote jeu).
+      # A laisser vide en production : tant qu elle vaut 1, tout achat est
+      # gratuit. Declaree ici meme vide, sinon le .env ne l atteint jamais.
+      STEAM_MICROTXN_SANDBOX: ${STEAM_MICROTXN_SANDBOX:-}
       # Ouvre le niveau detaille de GET /api/health (fraicheur des sauvegardes).
       # Doit etre declaree ICI et pas seulement dans .env : ce bloc est explicite,
       # une variable absente de la liste n atteint jamais le conteneur.
