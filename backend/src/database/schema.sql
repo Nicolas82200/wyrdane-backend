@@ -47,7 +47,7 @@ CREATE TABLE users (
   -- (cartes/decks) pour les comptes créés avant l'ajout de ce bonus, qui
   -- reçoivent désormais 250 dès la création (voir userModel.createWithSteamAccount).
   starter_currency_claimed_at TIMESTAMP NULL DEFAULT NULL,
-  -- Rempli par POST /api/collection/claim-tutorial-reward : lot unique de 25
+  -- Rempli par POST /api/collection/claim-tutorial-reward : lot unique de 20
   -- cartes aléatoires octroyé à la fin du tutoriel (voir
   -- model/tutorialRewardModel). Distinct de starter_claimed_at, qui est
   -- désormais réclamé dès la première connexion et non en fin de tutoriel.
