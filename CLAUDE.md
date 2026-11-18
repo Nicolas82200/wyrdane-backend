@@ -325,6 +325,14 @@ crontab -e
 
 Restauration : `./scripts/restore-db.sh <dump.sql.gz>`. Opération destructive — le script exige de taper `RESTAURER`, prend d'abord une sauvegarde de sécurité de l'état courant (`pre-restore_*.sql.gz`, le filet qui permet de revenir en arrière si on restaure le mauvais dump) puis redémarre le conteneur API. **Tester une restauration au moins une fois** sur une base jetable : une sauvegarde jamais restaurée est une hypothèse, pas une garantie.
 
+### Bidouille d'un profil de test (`scripts/dev-profile.sh`)
+
+`./scripts/dev-profile.sh <steamid64> show|gold <montant>|reset` agit sur **un seul compte**, désigné par son SteamID64 (résolu via `linked_accounts`) — jamais sur la base entière. Même mode d'emploi que les scripts de sauvegarde : à lancer depuis le dossier du dépôt, lit `.env`, parle à MySQL par `docker compose exec`, toujours avec `--default-character-set=utf8mb4` (voir « Piège encodage » plus haut).
+
+- `gold <montant>` ajoute (ou retire, montant négatif) de la monnaie molle, bornée à 0, **avec** la ligne correspondante dans `currency_ledger` (`reason = 'dev_grant'`) : le solde dénormalisé et son audit ne doivent jamais divergir, même pour un crédit de test.
+- `reset` remet le compte dans l'état « première connexion » pour retester l'onboarding : collection, decks, quêtes, niveau, or et les quatre drapeaux de réclamation unique (`starter_claimed_at`, `starter_currency_claimed_at`, `tutorial_reward_claimed_at`, `first_login_reward_claimed_at`) repartent à zéro, donc le bonus de 500 or et le lot de cartes de fin de tutoriel sont réclamables à nouveau. Destructif : exige de retaper le SteamID. Ne touche volontairement pas à ce qui est **partagé ou comptable** — `match_history`, `match_reports`, amis, messages, `purchase_ledger` et cosmétiques — pour les mêmes raisons que l'anonymisation RGPD décrite juste en dessous.
+- ⚠ Le tutoriel est marqué comme fait **côté client**, pas en base : effacer aussi `tutorial_completed` dans `%APPDATA%\Godot\app_userdata\Wyrdane\display_settings.cfg` (voir `SettingsManager.gd` côté `card-game`), sinon il ne se relance pas malgré le reset.
+
 ### Données personnelles & RGPD (`accountModel.ts`)
 
 Deux routes, montées sur `/api/users` (auth + CSRF comme le reste) :
