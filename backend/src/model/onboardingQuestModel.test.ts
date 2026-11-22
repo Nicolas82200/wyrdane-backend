@@ -149,12 +149,46 @@ describe("progressForMatch", () => {
 		expect(mockedDb.query).toHaveBeenLastCalledWith(expect.stringContaining("SET progress = LEAST"), [1]);
 	});
 
-	// Décision produit 2026-11-02 : la garde est en tête de fonction, donc
-	// aucune requête n'est même émise hors multijoueur apparié.
-	it.each(["solo", "friendly"] as const)("does not touch any quest in %s mode", async (mode) => {
+	// Décision produit 2026-11-02 : les quêtes de partie annoncées multijoueur
+	// ignorent l'IA et les invitations d'ami. Depuis le 2026-11-22 la garde est
+	// par objectif et non plus en tête de fonction (play_any/win_any comptent le
+	// solo), donc des requêtes SONT émises en solo — mais pas sur ces quêtes-là.
+	it.each(["solo", "friendly"] as const)("does not touch a multiplayer quest in %s mode", async (mode) => {
+		const template = ONBOARDING_QUEST_TEMPLATES.find((t) => t.objective === "win")!;
+		queueEnsureOnboardingQuests([templateRow({ quest_code: template.code, progress: 0, target: template.target })]);
+
 		await progressForMatch(1, 5, mode, true);
 
-		expect(mockedDb.query).not.toHaveBeenCalled();
+		expect(mockedDb.query).not.toHaveBeenCalledWith(expect.stringContaining("SET progress"), expect.anything());
+	});
+
+	it.each(["solo", "friendly", "normal", "ranked"] as const)("increments 'play_any' in %s mode", async (mode) => {
+		const template = ONBOARDING_QUEST_TEMPLATES.find((t) => t.objective === "play_any")!;
+		queueEnsureOnboardingQuests([templateRow({ quest_code: template.code, progress: 0, target: template.target })]);
+		mockedDb.query.mockResolvedValueOnce([{}]);
+
+		await progressForMatch(1, 5, mode, false);
+
+		expect(mockedDb.query).toHaveBeenLastCalledWith(expect.stringContaining("SET progress = LEAST"), [1]);
+	});
+
+	it("increments 'win_any' on a solo win", async () => {
+		const template = ONBOARDING_QUEST_TEMPLATES.find((t) => t.objective === "win_any")!;
+		queueEnsureOnboardingQuests([templateRow({ quest_code: template.code, progress: 0, target: template.target })]);
+		mockedDb.query.mockResolvedValueOnce([{}]);
+
+		await progressForMatch(1, 5, "solo", true);
+
+		expect(mockedDb.query).toHaveBeenLastCalledWith(expect.stringContaining("SET progress = LEAST"), [1]);
+	});
+
+	it("does not increment 'win_any' on a solo loss", async () => {
+		const template = ONBOARDING_QUEST_TEMPLATES.find((t) => t.objective === "win_any")!;
+		queueEnsureOnboardingQuests([templateRow({ quest_code: template.code, progress: 0, target: template.target })]);
+
+		await progressForMatch(1, 5, "solo", false);
+
+		expect(mockedDb.query).not.toHaveBeenCalledWith(expect.stringContaining("SET progress"), expect.anything());
 	});
 
 	it("skips quests already at their target or already claimed", async () => {

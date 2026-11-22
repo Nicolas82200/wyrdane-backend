@@ -12,7 +12,11 @@ import { countsForMatchQuests, isRankedMatch, type QuestMatchMode } from "./ques
 // pénaliser un joueur qui n'a juste pas ouvert le menu à temps).
 interface OnboardingQuestTemplate {
 	code: string;
-	objective: "reach_level" | "buy_packs" | "win" | "win_ranked" | "play_network";
+	// play_any/win_any comptent TOUS les modes, solo contre l'IA compris : un
+	// nouveau joueur doit pouvoir avancer sur cette piste sans jamais toucher
+	// au multijoueur (demande produit 2026-11-22). win/win_ranked/play_network
+	// restent réservés au multijoueur apparié, voir questMatchMode.
+	objective: "reach_level" | "buy_packs" | "win" | "win_ranked" | "play_network" | "play_any" | "win_any";
 	target: number;
 	rewardCurrency: number;
 	rewardPack: number;
@@ -22,6 +26,10 @@ interface OnboardingQuestTemplate {
 }
 
 const ONBOARDING_QUEST_TEMPLATES: OnboardingQuestTemplate[] = [
+	{ code: "play_any_1", objective: "play_any", target: 1, rewardCurrency: 50, rewardPack: 0, descriptionKey: "QUEST_ONBOARDING_PLAY_ANY_1" },
+	{ code: "win_any_1", objective: "win_any", target: 1, rewardCurrency: 100, rewardPack: 0, descriptionKey: "QUEST_ONBOARDING_WIN_ANY_1" },
+	{ code: "play_any_10", objective: "play_any", target: 10, rewardCurrency: 150, rewardPack: 0, descriptionKey: "QUEST_ONBOARDING_PLAY_ANY_10" },
+	{ code: "win_any_5", objective: "win_any", target: 5, rewardCurrency: 200, rewardPack: 1, descriptionKey: "QUEST_ONBOARDING_WIN_ANY_5" },
 	{ code: "reach_level_5", objective: "reach_level", level: 5, target: 1, rewardCurrency: 100, rewardPack: 0, descriptionKey: "QUEST_ONBOARDING_REACH_LEVEL_5" },
 	{ code: "reach_level_10", objective: "reach_level", level: 10, target: 1, rewardCurrency: 150, rewardPack: 0, descriptionKey: "QUEST_ONBOARDING_REACH_LEVEL_10" },
 	{ code: "reach_level_15", objective: "reach_level", level: 15, target: 1, rewardCurrency: 200, rewardPack: 1, descriptionKey: "QUEST_ONBOARDING_REACH_LEVEL_15" },
@@ -181,19 +189,23 @@ const progressForMatch = async (
 	won: boolean,
 	_raceData: MatchRaceData = {},
 ): Promise<void> => {
-	// Même garde que uniqueQuestModel.progressForMatch : tous les objectifs
-	// traités ici sont des quêtes de partie, ni l'IA ni une invitation d'ami ne
-	// les font progresser. reach_level/buy_packs ont leurs propres entrées.
-	if (!countsForMatchQuests(mode)) return;
+	// La garde countsForMatchQuests (ni IA ni invitation d'ami) ne s'applique
+	// plus à la piste entière mais objectif par objectif : play_any/win_any
+	// comptent tous les modes, les autres quêtes de partie restent réservées au
+	// multijoueur apparié. reach_level/buy_packs ont leurs propres entrées.
+	const counts = countsForMatchQuests(mode);
 	const quests = await ensureOnboardingQuests(userId, currentLevel);
 	for (const quest of quests) {
 		if (quest.claimed_at !== null || quest.progress >= quest.target) continue;
 		const template = templateByCode(quest.quest_code);
 		if (!template) continue;
 
-		if ((template.objective === "win" && won) || template.objective === "play_network") {
-			await db.query("UPDATE onboarding_quests SET progress = LEAST(progress + 1, target) WHERE id = ?", [quest.id]);
-		} else if (template.objective === "win_ranked" && won && isRankedMatch(mode)) {
+		const progresses =
+			template.objective === "play_any" ||
+			(template.objective === "win_any" && won) ||
+			(counts && ((template.objective === "win" && won) || template.objective === "play_network")) ||
+			(template.objective === "win_ranked" && won && isRankedMatch(mode));
+		if (progresses) {
 			await db.query("UPDATE onboarding_quests SET progress = LEAST(progress + 1, target) WHERE id = ?", [quest.id]);
 		}
 	}
