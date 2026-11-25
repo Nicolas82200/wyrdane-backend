@@ -1,4 +1,12 @@
-.env
+# Tout fichier d'environnement, pas seulement `.env` : le `.env` reel vit sur
+# le VPS, dans ce meme repertoire de travail, et toute intervention manuelle y
+# laisse une copie de sauvegarde (`.env.bak-2026-11-12`,
+# `.env.bak-healthkey-2026-11-13` au 2026-11-25). Ces copies portent les
+# secrets de prod en clair ; avec le seul motif `.env`, elles ressortaient en
+# `??` dans `git status` sur le VPS, a un `git add .` malheureux de la fuite.
+.env*
+!.env.example
+!.env.sample
 node_modules/
 dist/
 .worktrees/
