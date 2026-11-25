@@ -2,20 +2,24 @@
 // source de vérité pour le texte/les stats des cartes — la seed du backend se
 // désynchronise silencieusement dès qu'une carte change côté jeu.
 //
-// Usage : node backend/scripts/generate-cards-data.mjs
+// Usage : node backend/scripts/generate-cards-data.mjs [chemin-vers-card-game]
 // Écrase directement backend/src/database/cards_data.sql. Relire le diff git
 // avant de commiter, puis rejouer `npm run db:migrate` (dev/local uniquement
 // — script destructeur, DROP + recrée tout) pour appliquer.
 //
-// Suppose que le dépôt du jeu est cloné en E:\card-game (même hypothèse que
-// wyrdane-website, voir son CLAUDE.md) — ajuster CARDS_DIR si ce n'est pas
-// le cas sur la machine où ce script tourne.
+// Le dépôt du jeu est pris en argument, et à défaut supposé cloné en
+// E:\card-game (même hypothèse et même signature que les deux générateurs de
+// wyrdane-website, voir son CLAUDE.md). L'argument n'est pas un confort : sans
+// lui, lancé depuis un worktree du jeu, ce script lit les .tres du dossier
+// principal — donc un autre état des cartes que celui qu'on croit publier, et
+// en silence. C'est ce que lui passe tools/publish_cards.mjs côté card-game.
 import { readFileSync, readdirSync, statSync, writeFileSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const CARDS_DIR = "E:/card-game/resources/cards";
+const CARD_GAME_DIR = process.argv[2] ?? "E:/card-game";
+const CARDS_DIR = join(CARD_GAME_DIR, "resources", "cards");
 const OUT_PATH = join(__dirname, "..", "src", "database", "cards_data.sql");
 
 function walk(dir) {
