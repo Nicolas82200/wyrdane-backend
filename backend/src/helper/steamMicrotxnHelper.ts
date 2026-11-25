@@ -27,6 +27,28 @@ if (SANDBOX && process.env.NODE_ENV === "production") {
 	);
 }
 
+// ─── Lecture d'une réponse Steam ─────────────────────────────────────────────
+// L'API partenaire ne répond pas toujours en JSON : sur une requête refusée
+// (clé invalide, appid inconnu, commande qu'elle n'a jamais vue) elle renvoie
+// un code 4xx accompagné d'une PAGE HTML. `res.json()` lève alors, et rien
+// dans ce module ne rattrapait l'exception : elle remontait jusqu'au
+// réconciliateur, qui rejouait les mêmes commandes toutes les 5 minutes sans
+// jamais les clore — 3 552 lignes de trace dans le journal de prod au
+// 2026-11-25, soit 8 % du volume, pour 4 commandes.
+//
+// Un corps illisible vaut donc « Steam n'a rien dit » (`null`) et jamais un
+// échec de paiement : voir la règle en tête de queryTxn, un silence ne conclut
+// rien. Les trois autres appels traitaient déjà `result !== "OK"` comme un
+// refus, ils héritent du même comportement sans changer de sémantique.
+const readSteamJson = async <T>(res: Response): Promise<T | null> => {
+	if (!res.ok) return null;
+	try {
+		return (await res.json()) as T;
+	} catch {
+		return null;
+	}
+};
+
 interface InitTxnItem {
 	itemId: string;
 	quantity: number;
@@ -83,9 +105,9 @@ const initTxn = async (
 	});
 
 	const res = await fetch(url, { method: "POST", body });
-	const data = (await res.json()) as InitTxnResponse;
+	const data = await readSteamJson<InitTxnResponse>(res);
 
-	if (data.response?.result !== "OK") return null;
+	if (!data || data.response?.result !== "OK") return null;
 	return data.response.params?.transid ?? null;
 };
 
@@ -102,9 +124,9 @@ const finalizeTxn = async (orderId: number): Promise<boolean> => {
 	});
 
 	const res = await fetch(url, { method: "POST", body });
-	const data = (await res.json()) as FinalizeTxnResponse;
+	const data = await readSteamJson<FinalizeTxnResponse>(res);
 
-	return data.response?.result === "OK";
+	return data?.response?.result === "OK";
 };
 
 // ─── GetUserInfo : pays et devise du portefeuille du joueur ──────────────────
@@ -147,8 +169,8 @@ const getUserInfo = async (steamId: string): Promise<SteamUserInfo | null> => {
 	url.searchParams.set("appid", STEAM_APP_ID as string);
 
 	const res = await fetch(url);
-	const data = (await res.json()) as GetUserInfoResponse;
-	if (data.response?.result !== "OK") return null;
+	const data = await readSteamJson<GetUserInfoResponse>(res);
+	if (!data || data.response?.result !== "OK") return null;
 
 	const currency = data.response.params?.currency;
 	const country = data.response.params?.country;
@@ -191,8 +213,22 @@ const TXN_REVOKED_STATUSES = new Set([
 	"revoked",
 ]);
 
+// Statut SYNTHÉTIQUE, absent de l'API Steam : la commande est inconnue de ses
+// serveurs (QueryTxn répond 400 « No microtransaction with the specified
+// orderid »). Elle n'y est jamais arrivée — ligne de test insérée à la main,
+// ou InitTxn qui a échoué avant d'aboutir. Rangée avec les échecs pour que le
+// réconciliateur la close : rien n'a été prélevé, il n'y a rien à rendre, et
+// la réinterroger éternellement est exactement ce qui saturait le journal.
+const TXN_UNKNOWN_ORDER = "unknownorder";
+
 // Issues définitivement perdues : rien n'a été prélevé, rien à rendre.
-const TXN_FAILED_STATUSES = new Set(["failed", "cancelled", "canceled", "timedout"]);
+const TXN_FAILED_STATUSES = new Set([
+	"failed",
+	"cancelled",
+	"canceled",
+	"timedout",
+	TXN_UNKNOWN_ORDER,
+]);
 
 interface QueryTxnResponse {
 	response?: {
@@ -221,8 +257,30 @@ const queryTxn = async (orderId: number): Promise<string | null> => {
 	url.searchParams.set("orderid", String(orderId));
 
 	const res = await fetch(url);
-	const data = (await res.json()) as QueryTxnResponse;
-	if (data.response?.result !== "OK") return null;
+
+	// Seul refus de Steam qui conclut quelque chose. Le corps est du HTML, pas
+	// du JSON — d'où la lecture en texte brut.
+	//
+	// ⚠ On ne se fie PAS au seul code 400 : Steam le renvoie aussi pour une clé
+	// ou un appid invalides. Clore une commande sur ce motif-là, c'est, à la
+	// première erreur de configuration, abandonner en masse les commandes de
+	// joueurs qui ont réellement payé — précisément le ticket de support que ce
+	// module existe pour éviter. On exige donc le message d'orderid inconnu, et
+	// tout autre 400 reste un « réessayer » bien visible dans le journal.
+	if (res.status === 400) {
+		const body = await res.text();
+		if (/no microtransaction with the specified orderid/i.test(body)) {
+			return TXN_UNKNOWN_ORDER;
+		}
+		console.warn(
+			`[steam] QueryTxn refusé pour la commande ${orderId} (HTTP 400) : ` +
+				`${body.slice(0, 200)}`,
+		);
+		return null;
+	}
+
+	const data = await readSteamJson<QueryTxnResponse>(res);
+	if (!data || data.response?.result !== "OK") return null;
 
 	const status = data.response.params?.status;
 	return status ? status.toLowerCase() : null;
@@ -236,5 +294,6 @@ export {
 	TXN_STATUS,
 	TXN_REVOKED_STATUSES,
 	TXN_FAILED_STATUSES,
+	TXN_UNKNOWN_ORDER,
 };
 export type { SteamUserInfo };
