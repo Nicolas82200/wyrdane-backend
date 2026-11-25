@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../model/db", () => ({
@@ -5,7 +8,7 @@ vi.mock("../model/db", () => ({
 }));
 
 import pool from "../model/db";
-import { runDataPatches } from "./dataPatches";
+import { ABOMINATION_CARD_RENAMES, runDataPatches } from "./dataPatches";
 
 const mockedPool = pool as unknown as { query: ReturnType<typeof vi.fn> };
 
@@ -54,6 +57,20 @@ describe("runDataPatches", () => {
 		expect(mockedPool.query.mock.calls.length).toBeGreaterThan(0);
 		for (const [sql] of mockedPool.query.mock.calls) {
 			expect(sql).toMatch(/^UPDATE cards SET .+ WHERE .+/s);
+		}
+	});
+	// Le test qui aurait évité l'incident : la seed et ce patch dérivent tous
+	// deux des .tres du jeu, mais par deux chemins différents (publish_cards.mjs
+	// d'un côté, cette liste à la main de l'autre). Un nom qui diverge ne casse
+	// rien visiblement — il écarte juste la carte, en silence, de la collection,
+	// des decks et de la révélation de pack.
+	it("keeps the Abomination renames in phase with cards_data.sql", () => {
+		const seed = readFileSync(join(__dirname, "cards_data.sql"), "utf8");
+
+		expect(ABOMINATION_CARD_RENAMES).toHaveLength(42);
+		for (const { from, to } of ABOMINATION_CARD_RENAMES) {
+			expect(seed, `nouveau nom absent de la seed : ${to}`).toContain(`('${to.replace(/'/g, "''")}',`);
+			expect(seed, `ancien nom encore dans la seed : ${from}`).not.toContain(`('${from.replace(/'/g, "''")}',`);
 		}
 	});
 });
